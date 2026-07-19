@@ -36,7 +36,7 @@ it from there — the permission binds to the copy that runs, so open the one th
    - select **RectZones** in the Accessibility list and press **−** to remove it,
    - press **+**, then ⌘⇧G and paste the path to `build/RectZones.app` to add it back.
 
-   `tccutil reset Accessibility com.bugra.rectzones` is an alternative, but remove-and-
+   `tccutil reset Accessibility app.rectzones.RectZones` is an alternative, but remove-and-
    re-add is the step that has actually worked here — reach for it first.
 
 ## 3. Handle conflicting systems (skip this and the user will think it's broken)

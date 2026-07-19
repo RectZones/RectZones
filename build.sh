@@ -19,7 +19,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <dict>
     <key>CFBundleName</key>              <string>RectZones</string>
     <key>CFBundleDisplayName</key>       <string>RectZones</string>
-    <key>CFBundleIdentifier</key>        <string>com.bugra.rectzones</string>
+    <key>CFBundleIdentifier</key>        <string>app.rectzones.RectZones</string>
     <key>CFBundleVersion</key>           <string>0.1</string>
     <key>CFBundleShortVersionString</key><string>0.1</string>
     <key>CFBundleExecutable</key>        <string>RectZones</string>

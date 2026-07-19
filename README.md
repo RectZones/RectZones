@@ -73,7 +73,7 @@ you're ready. That's the whole install — no account, no notarization, nothing 
    select **RectZones** → **−**, then **+** and pick your `build/RectZones.app`
    (⌘⇧G pastes a path). Reopen the app; the log should show `event tap installed`.
    Careful not to grab the neighbouring **Rectangle** row if you have that installed.
-   (`tccutil reset Accessibility com.bugra.rectzones` is an alternative, but the
+   (`tccutil reset Accessibility app.rectzones.RectZones` is an alternative, but the
    remove-and-re-add is what reliably works.)
 2. **macOS built-in tiling gets in the way** (macOS 15+). Its edge-drag overlay looks
    like ours but ignores templates. Disable:
