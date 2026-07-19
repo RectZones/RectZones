@@ -1,0 +1,97 @@
+name: Bug report
+description: Something in RectZones behaves incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The single most useful thing you can attach is
+        `/tmp/rectzones.log` — it records the permission state, trigger
+        detection, and every window placement, and usually explains the problem
+        on its own.
+
+  - type: checkboxes
+    id: triage
+    attributes:
+      label: First, the three things that cause most reports
+      description: >
+        Please check these before filing — each is covered in the
+        [README troubleshooting section](https://github.com/RectZones/RectZones#troubleshooting).
+      options:
+        - label: >
+            The menu bar icon shows ▦ (not ▦⚠). If it shows ▦⚠ after a rebuild,
+            remove and re-add RectZones in System Settings → Privacy & Security
+            → Accessibility — toggling it off and on does not work.
+        - label: >
+            macOS built-in tiling is off (`defaults write com.apple.WindowManager
+            EnableTilingByEdgeDrag -bool false && killall WindowManager`).
+        - label: >
+            No other window manager (Rectangle, BetterSnapTool, Magnet…) is
+            running and drawing its own overlay.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+      placeholder: |
+        I held ⌘ and dragged Safari over the left zone. I expected it to fill
+        that zone. Instead it filled the whole screen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Safari
+        2. Hold ⌘ and start dragging the window
+        3. Move over the left zone
+        4. Release
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: displays
+    attributes:
+      label: Display setup
+      options:
+        - Single built-in display
+        - Single external display
+        - Built-in + external
+        - Multiple external displays
+    validations:
+      required: true
+
+  - type: input
+    id: trigger
+    attributes:
+      label: Trigger key
+      description: >
+        As configured in Settings → Trigger Key. If you have remapped modifiers,
+        say which key you physically press and what it produces.
+      placeholder: "⌘ Command"
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Diagnostic log
+      description: >
+        Paste the relevant part of `/tmp/rectzones.log`, or attach the whole
+        file. Reproduce the problem first so the tail covers it.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots or a screen recording are very welcome for placement bugs.

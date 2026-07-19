@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RectZones — Free FancyZones for Mac · Open-Source Window Manager</title>
+<meta name="description" content="RectZones brings PowerToys FancyZones to macOS: design custom snap zones, drag windows into them, sweep across several zones to span them. A free, open-source alternative to Magnet and Rectangle with fully customizable layouts.">
+<link rel="canonical" href="https://rectzones.github.io/RectZones/">
+<link rel="icon" href="icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="RectZones — Free FancyZones for Mac">
+<meta property="og:description" content="Custom snap zones for macOS. Free, open-source, fully customizable — the Mac answer to PowerToys FancyZones, and a free alternative to Magnet.">
+<meta property="og:url" content="https://rectzones.github.io/RectZones/">
+<meta property="og:image" content="https://rectzones.github.io/RectZones/shot-zones.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="RectZones — Free FancyZones for Mac">
+<meta name="twitter:description" content="Custom snap zones for macOS. Free, open-source, fully customizable window management.">
+<meta name="twitter:image" content="https://rectzones.github.io/RectZones/shot-zones.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "RectZones",
+  "operatingSystem": "macOS 13+",
+  "applicationCategory": "UtilitiesApplication",
+  "description": "Zone-based window manager for macOS: design custom snap zones, drag windows into them with a trigger key, sweep across several zones to span them, cycle windows through grids from the keyboard. A free, open-source FancyZones equivalent for Mac.",
+  "url": "https://rectzones.github.io/RectZones/",
+  "downloadUrl": "https://github.com/RectZones/RectZones",
+  "screenshot": "https://rectzones.github.io/RectZones/shot-zones.png",
+  "license": "https://github.com/RectZones/RectZones/blob/main/LICENSE",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "Is there a FancyZones equivalent for macOS?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes — RectZones brings the PowerToys FancyZones workflow to macOS: you design zone templates, hold a trigger key while dragging a window, and drop it into a zone. Sweeping across zones with that same key held lets one window span several of them, exactly like FancyZones on Windows — no second modifier needed."}},
+    {"@type": "Question", "name": "Is RectZones a free alternative to Magnet?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes. Magnet is a paid app with fixed halves and quarters. RectZones is free and MIT-licensed, covers the same edge and corner snapping, and adds fully custom zone layouts, multi-zone spanning and keyboard grid cycling."}},
+    {"@type": "Question", "name": "How is RectZones different from Rectangle?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Rectangle is a great free tool for fixed positions via keyboard shortcuts. RectZones adds what Rectangle doesn't have: user-designed zone templates with a visual editor, a drag overlay that shows all zones at once, a single-key sweep that combines zones into one area, and per-shortcut grid cycling. RectZones was built from scratch, inspired by Rectangle (MIT)."}},
+    {"@type": "Question", "name": "What permissions does RectZones need?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Only macOS Accessibility permission, which every window manager needs to move windows. RectZones has no network access, no analytics, no account — it is a single Objective-C file you can read in one sitting."}},
+    {"@type": "Question", "name": "Can an AI agent install RectZones for me?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes. Point your coding agent (Claude Code or similar) at the GitHub repository and say 'install this'. The repo ships SETUP.md, a step-by-step runbook the agent follows: it builds the app, walks you through the permission, verifies everything against the diagnostic log and gives you a tour."}},
+    {"@type": "Question", "name": "Does RectZones support multiple monitors?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes — zones are defined as proportions of each screen, templates apply per display, and there is a dedicated shortcut to send a window to the next display while keeping its relative position."}}
+  ]
+}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0b1220;          /* gece masaüstü */
+    --ink-2: #101a2e;
+    --panel: #141f36;
+    --line: #24324e;
+    --fg: #e9eefb;
+    --muted: #93a1bd;
+    --azure: #4d90ff;        /* ikonun mavisi */
+    --azure-soft: rgba(77,144,255,.14);
+    --amber: #ffc46b;        /* sıcak vurgu */
+    --ok: #67d99b;
+    --radius: 14px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background:
+      radial-gradient(1100px 500px at 80% -10%, rgba(77,144,255,.16), transparent 60%),
+      radial-gradient(900px 500px at -10% 30%, rgba(255,196,107,.07), transparent 55%),
+      var(--ink);
+    color: var(--fg);
+    font: 17px/1.65 "Instrument Sans", -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  ::selection { background: var(--azure); color: #fff; }
+  a { color: var(--azure); text-decoration: none; }
+  main { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
+  h1, h2, h3 { font-family: "Bricolage Grotesque", "Instrument Sans", sans-serif; letter-spacing: -0.02em; }
+  kbd {
+    font: 600 0.82em "JetBrains Mono", monospace;
+    background: linear-gradient(#1d2a45, #16223a);
+    border: 1px solid var(--line);
+    border-bottom-width: 3px;
+    border-radius: 7px;
+    padding: 2px 8px 3px;
+    color: var(--fg);
+    white-space: nowrap;
+  }
+  code { font: 500 0.9em "JetBrains Mono", monospace; color: var(--amber); }
+
+  /* ---------- hero ---------- */
+  header { position: relative; padding: 84px 0 30px; }
+  .zone-art { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+  .zone-art .z {
+    position: absolute; border: 1.5px dashed rgba(77,144,255,.28); border-radius: 12px;
+    animation: zfloat 9s ease-in-out infinite;
+  }
+  .zone-art .z.fill { background: var(--azure-soft); border-style: solid; border-color: rgba(77,144,255,.5); }
+  @keyframes zfloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+  .hero { position: relative; z-index: 1; }
+  .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 42px; }
+  .brand img { width: 46px; height: 46px; }
+  .brand b { font-family: "Bricolage Grotesque", sans-serif; font-size: 21px; }
+  .brand .gh { margin-left: auto; color: var(--muted); font-weight: 500; font-size: 15px; }
+  .brand .gh:hover { color: var(--fg); }
+  h1 {
+    font-size: clamp(40px, 6.4vw, 72px); font-weight: 800; line-height: 1.04;
+    max-width: 15ch;
+  }
+  h1 .accent { color: var(--azure); }
+  h1 .amber { color: var(--amber); }
+  .sub {
+    margin: 26px 0 34px; max-width: 58ch; color: var(--muted); font-size: 19px;
+  }
+  .sub b { color: var(--fg); font-weight: 600; }
+  .ctas { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 14px 26px; border-radius: 12px; font-weight: 600; font-size: 16.5px;
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .btn:hover { transform: translateY(-2px); }
+  .btn-primary {
+    background: var(--azure); color: #fff;
+    box-shadow: 0 10px 30px rgba(77,144,255,.35);
+  }
+  .btn-primary:hover { box-shadow: 0 14px 36px rgba(77,144,255,.45); }
+  .btn-ghost { border: 1px solid var(--line); color: var(--fg); background: rgba(255,255,255,.02); }
+  .facts { display: flex; gap: 10px 26px; flex-wrap: wrap; margin-top: 30px; color: var(--muted); font-size: 14.5px; }
+  .facts span::before { content: "▪ "; color: var(--azure); }
+  /* staggered reveal */
+  .r { opacity: 0; transform: translateY(14px); animation: rise .7s cubic-bezier(.2,.7,.2,1) forwards; }
+  .r2 { animation-delay: .12s; } .r3 { animation-delay: .24s; } .r4 { animation-delay: .36s; } .r5 { animation-delay: .5s; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  .shot-frame {
+    margin: 56px 0 0; border-radius: var(--radius); overflow: hidden;
+    border: 1px solid var(--line);
+    box-shadow: 0 34px 90px rgba(0,0,0,.5);
+  }
+  .shot-frame img { display: block; width: 100%; }
+
+  /* ---------- sections ---------- */
+  section { padding: 84px 0 0; }
+  .kicker {
+    font: 600 13px/1 "JetBrains Mono", monospace; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--amber); margin-bottom: 14px;
+  }
+  h2 { font-size: clamp(28px, 3.6vw, 40px); font-weight: 800; max-width: 24ch; }
+  .lede { color: var(--muted); max-width: 62ch; margin-top: 14px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 36px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 24px; transition: transform .18s ease, border-color .18s ease;
+  }
+  .card:hover { transform: translateY(-3px); border-color: #35507f; }
+  .card h3 { font-size: 19px; margin-bottom: 8px; }
+  .card p { color: var(--muted); font-size: 15.5px; }
+  .card img { width: 100%; border-radius: 8px; border: 1px solid var(--line); margin-top: 16px; }
+  .card .term { margin-top: 16px; font-size: 13px; padding: 14px 16px; line-height: 1.9; }
+
+  /* comparison */
+  .tablewrap { overflow-x: auto; margin-top: 36px; border: 1px solid var(--line); border-radius: var(--radius); }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; background: var(--ink-2); font-size: 15px; }
+  th, td { padding: 13px 18px; text-align: left; border-bottom: 1px solid var(--line); }
+  thead th { font: 600 13px/1.4 "JetBrains Mono", monospace; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+  tbody th { font-weight: 500; color: var(--muted); white-space: nowrap; }
+  td.rz { background: rgba(77,144,255,.07); font-weight: 600; }
+  .yes { color: var(--ok); } .no { color: #7c8aa5; } .paid { color: var(--amber); }
+  tbody tr:last-child th, tbody tr:last-child td { border-bottom: none; }
+
+  /* agent */
+  .agent {
+    margin-top: 36px; display: grid; grid-template-columns: 1.1fr .9fr; gap: 28px;
+    background: linear-gradient(120deg, rgba(77,144,255,.10), rgba(255,196,107,.05));
+    border: 1px solid var(--line); border-radius: var(--radius); padding: 34px;
+  }
+  .term {
+    background: #0a0f1c; border: 1px solid var(--line); border-radius: 12px;
+    font: 14.5px/1.8 "JetBrains Mono", monospace; padding: 20px 22px; align-self: center;
+    overflow-x: auto;
+  }
+  .term .p { color: var(--ok); }
+  .term .c { color: var(--muted); }
+  .agent h3 { font-size: 24px; margin-bottom: 10px; }
+  .agent p { color: var(--muted); font-size: 16px; margin-bottom: 12px; }
+
+  /* faq */
+  .faq { margin-top: 36px; display: grid; gap: 12px; }
+  details {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px;
+  }
+  details[open] { border-color: #35507f; }
+  summary { cursor: pointer; font-weight: 600; font-size: 16.5px; list-style: none; }
+  summary::before { content: "＋ "; color: var(--azure); font-weight: 700; }
+  details[open] summary::before { content: "－ "; }
+  details p { color: var(--muted); margin-top: 10px; font-size: 15.5px; }
+
+  footer {
+    margin-top: 96px; padding: 34px 24px 44px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 14px; text-align: center;
+  }
+  footer a { color: var(--muted); text-decoration: underline; }
+  @media (max-width: 760px) {
+    .agent { grid-template-columns: 1fr; }
+    header { padding-top: 56px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="zone-art" aria-hidden="true">
+      <div class="z" style="top:8%; right:2%; width:220px; height:130px; animation-delay:0s"></div>
+      <div class="z fill" style="top:34%; right:12%; width:180px; height:110px; animation-delay:1.4s"></div>
+      <div class="z" style="top:60%; right:-4%; width:260px; height:120px; animation-delay:2.6s"></div>
+    </div>
+    <div class="hero">
+      <div class="brand r">
+        <img src="icon.png" alt="RectZones app icon">
+        <b>RectZones</b>
+        <a class="gh" href="https://github.com/RectZones/RectZones">github.com/RectZones ↗</a>
+      </div>
+      <h1 class="r r2">FancyZones,<br>for your <span class="accent">Mac</span>.<br><span class="amber">Free.</span></h1>
+      <p class="sub r r3">Magnet costs money and locks you into halves. Rectangle is free but its
+        positions are fixed. RectZones gives you the missing piece: <b>zones you design yourself</b> —
+        hold <kbd>⌘</kbd> while dragging and drop the window exactly where you planned.
+        Hold <kbd>⇧</kbd> to make one window span several zones. Open source, MIT, no account.</p>
+      <div class="ctas r r4">
+        <a class="btn btn-primary" href="https://github.com/RectZones/RectZones">★ View on GitHub</a>
+        <a class="btn btn-ghost" href="#agent">🤖 Install with your AI agent</a>
+      </div>
+      <div class="facts r r5">
+        <span>100% free &amp; open source</span>
+        <span>macOS 13+</span>
+        <span>No network, no analytics</span>
+        <span>One Objective-C file</span>
+      </div>
+      <div class="shot-frame r r5">
+        <img src="shot-zones.png" alt="RectZones overlay: dragging a macOS window over a 3×2 zone grid with two zones selected by sweeping">
+      </div>
+    </div>
+  </header>
+
+  <section id="features">
+    <div class="kicker">What you get</div>
+    <h2>Every window lands exactly where you decided it should.</h2>
+    <div class="grid">
+      <div class="card"><h3>Drag &amp; snap into your zones</h3>
+        <p>Hold the trigger key (⌘ by default — or ⌥, ⌃, 🌐, even a custom key) while dragging.
+           Your template appears; release over a zone and the window snaps in, with an
+           adjustable gap around it.</p>
+        <img src="shot-drag.png" alt="Zone template appearing while dragging a window with the trigger key" loading="lazy"></div>
+      <div class="card"><h3>Sweep to span zones</h3>
+        <p>No second modifier — keep the same trigger key held and sweep across zones: the preview
+           lights up the full area the window will cover, including cells completed by the union,
+           before you drop. Let go of the key to cancel.</p>
+        <img src="shot-span.png" alt="Multi-zone selection lighting up the covered cells" loading="lazy"></div>
+      <div class="card"><h3>Design your own templates</h3>
+        <p>Draw zones freely, or type columns × rows and hit Apply Grid. Name templates, switch
+           with one click. Your 4×4 for the ultrawide, your Left-Wide for the laptop.</p>
+        <img src="shot-editor.png" alt="RectZones template editor with a 4×4 grid" loading="lazy"></div>
+      <div class="card"><h3>Keyboard grid cycling</h3>
+        <p>Press the same shortcut again and the window hops to the next cell — 2×1 up to 4×2 grids,
+           two-thirds, a corner-hop ladder, next display. Each row shows a mini preview of its coverage.</p>
+        <img src="shot-shortcuts.png" alt="RectZones shortcuts panel with per-action grid previews" loading="lazy"></div>
+      <div class="card"><h3>Edge &amp; corner snapping</h3>
+        <p>No key at all: corners give quarters, the top edge maximizes, the bottom edge gives thirds
+           (slide along it for two-thirds), the sides give halves — with a live footprint preview.</p>
+        <img src="shot-edge.png" alt="Corner snap footprint preview while pushing a window to the top-left corner" loading="lazy"></div>
+      <div class="card"><h3>Honest &amp; auditable</h3>
+        <p>MIT licensed, a single readable source file, zero dependencies, no updater phoning home.
+           The only permission it needs is Accessibility — the one every window manager requires.</p>
+        <div class="term">
+          <div>src/main.m <span class="c">· the whole app, one file</span></div>
+          <div>dependencies <span class="c">· none</span></div>
+          <div>network access <span class="c">· none</span></div>
+          <div>LICENSE <span class="c">· MIT</span></div>
+        </div></div>
+    </div>
+  </section>
+
+  <section id="compare">
+    <div class="kicker">The landscape</div>
+    <h2>Where RectZones sits among Magnet, Rectangle and FancyZones</h2>
+    <p class="lede">Short version: Magnet is paid with fixed layouts, Rectangle is free with fixed
+      layouts, FancyZones is Windows-only. RectZones is the free, fully customizable one on macOS.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th></th><th>RectZones</th><th>Rectangle</th><th>Magnet</th><th>FancyZones</th></tr></thead>
+        <tbody>
+          <tr><th>Price</th><td class="rz yes">Free · MIT</td><td class="yes">Free</td><td class="paid">$9.99</td><td class="yes">Free · Windows</td></tr>
+          <tr><th>Platform</th><td class="rz">macOS</td><td>macOS</td><td>macOS</td><td class="no">Windows only</td></tr>
+          <tr><th>Custom zone templates</th><td class="rz yes">✓ visual editor + N×M</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td></tr>
+          <tr><th>Zones overlay while dragging</th><td class="rz yes">✓</td><td class="no">edges only</td><td class="no">edges only</td><td class="yes">✓</td></tr>
+          <tr><th>One window across many zones</th><td class="rz yes">✓ hold ⇧</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td></tr>
+          <tr><th>Keyboard cycling through cells</th><td class="rz yes">✓ with previews</td><td class="yes">✓</td><td class="no">partial</td><td class="no">✗</td></tr>
+          <tr><th>Edge/corner snapping</th><td class="rz yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">✗</td></tr>
+          <tr><th>Gaps between windows</th><td class="rz yes">✓ 0–40 px</td><td class="yes">✓</td><td class="no">✗</td><td class="yes">✓</td></tr>
+          <tr><th>AI-agent guided install</th><td class="rz yes">✓ SETUP.md runbook</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="agent">
+    <div class="kicker">Install in one sentence</div>
+    <h2>Tell your agent: “install this”.</h2>
+    <div class="agent">
+      <div>
+        <h3>🤖 The agent way</h3>
+        <p>Using Claude Code or another coding agent? Give it the repo address and say
+          <code>install this</code>. The repo ships <b>SETUP.md</b> — a runbook the agent follows:
+          it builds the app, walks you through the single Accessibility permission, verifies
+          everything against the diagnostic log, then gives you a tour.</p>
+        <p>Prefer doing it yourself? It's four commands and one permission —
+          see the <a href="https://github.com/RectZones/RectZones#install--by-hand">README</a>.</p>
+      </div>
+      <div class="term">
+        <div><span class="p">you&gt;</span> https://github.com/RectZones/RectZones</div>
+        <div><span class="p">you&gt;</span> install this</div>
+        <div><span class="c"># agent clones, builds, guides the permission,</span></div>
+        <div><span class="c"># proves it works from the log, gives you a tour.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="kicker">Questions people ask</div>
+    <h2>FAQ</h2>
+    <div class="faq">
+      <details><summary>Is there a FancyZones equivalent for macOS?</summary>
+        <p>Yes — RectZones brings the PowerToys FancyZones workflow to macOS: you design zone
+        templates, hold a trigger key while dragging a window, and drop it into a zone. Sweeping
+        across zones with that same key held lets one window span several of them, exactly like
+        FancyZones on Windows — no second modifier needed.</p></details>
+      <details><summary>Is RectZones a free alternative to Magnet?</summary>
+        <p>Yes. Magnet is a paid app with fixed halves and quarters. RectZones is free and
+        MIT-licensed, covers the same edge and corner snapping, and adds fully custom zone
+        layouts, multi-zone spanning and keyboard grid cycling.</p></details>
+      <details><summary>How is RectZones different from Rectangle?</summary>
+        <p>Rectangle is a great free tool for fixed positions via keyboard shortcuts. RectZones
+        adds what Rectangle doesn't have: user-designed zone templates with a visual editor, a
+        drag overlay that shows all zones at once, a single-key sweep that combines zones into one
+        area, and per-shortcut grid cycling. RectZones was built from scratch, inspired by Rectangle (MIT).</p></details>
+      <details><summary>What permissions does RectZones need?</summary>
+        <p>Only macOS Accessibility permission, which every window manager needs to move windows.
+        RectZones has no network access, no analytics, no account — it is a single Objective-C
+        file you can read in one sitting.</p></details>
+      <details><summary>Can an AI agent install RectZones for me?</summary>
+        <p>Yes. Point your coding agent (Claude Code or similar) at the GitHub repository and say
+        "install this". The repo ships SETUP.md, a step-by-step runbook the agent follows: it
+        builds the app, walks you through the permission, verifies everything against the
+        diagnostic log and gives you a tour.</p></details>
+      <details><summary>Does RectZones support multiple monitors?</summary>
+        <p>Yes — zones are defined as proportions of each screen, templates apply per display,
+        and there is a dedicated shortcut to send a window to the next display while keeping its
+        relative position.</p></details>
+    </div>
+  </section>
+
+  <footer>
+    MIT © 2026 Buğra Karaman · <a href="https://github.com/RectZones/RectZones">Source on GitHub</a> ·
+    Inspired by <a href="https://github.com/rxhanson/Rectangle">Rectangle</a> ·
+    Built for macOS 13+ · RectZones is not affiliated with Apple, Microsoft, Magnet or Rectangle.
+  </footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # RectZones itself has no dependencies — one Objective-C file against Apple
+  # system frameworks. This keeps the CI actions patched, which is the only
+  # third-party code in the repository.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"

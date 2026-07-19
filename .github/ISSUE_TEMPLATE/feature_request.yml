@@ -1,0 +1,51 @@
+name: Feature request
+description: Suggest something RectZones should do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please check the
+        [roadmap in AGENTS.md](https://github.com/RectZones/RectZones/blob/main/AGENTS.md#roadmap--open-items)
+        — launch at login, previous display, center, restore, and per-screen
+        templates are already planned.
+
+        Also worth knowing what RectZones deliberately does **not** do: it has
+        no updater, no network access, and no dependencies, and it is one
+        Objective-C file. Proposals that require breaking any of those are a
+        hard sell.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve
+      description: >
+        Describe the situation you run into, not the solution you have in mind.
+        This usually leads to a better feature than starting from the solution.
+      placeholder: >
+        When I move a window to my vertical monitor, the zone template designed
+        for the wide screen makes no sense there.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including how you work around it today, if you do.
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Would you like to implement it?
+      options:
+        - label: >
+            I would be willing to open a pull request for this (we will help you
+            find your way around `src/main.m`).
