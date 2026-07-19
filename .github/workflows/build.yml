@@ -31,7 +31,7 @@ jobs:
 
       - name: Build is reproducible
         run: |
-          # An unchanged src/main.m must produce a byte-identical binary —
+          # An unchanged source tree must produce a byte-identical binary —
           # this is what lets a user's Accessibility grant survive a rebuild,
           # and what makes a released binary verifiable against source.
           shasum -a 256 build/RectZones.app/Contents/MacOS/RectZones > /tmp/first.sha
@@ -42,6 +42,12 @@ jobs:
             exit 1
           fi
           echo "Reproducible: $(cut -d' ' -f1 /tmp/first.sha)"
+
+      - name: Tests
+        # A separate clang target linking only src/rzcore.m and Foundation, so it
+        # neither needs a display nor disturbs the app binary the reproducibility
+        # check above just verified.
+        run: ./test.sh
 
       - name: Snapshot renderer still compiles
         run: |
