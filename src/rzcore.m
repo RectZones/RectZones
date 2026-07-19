@@ -38,7 +38,8 @@ NSArray<RZTemplate *> *RZPresetTemplates(void) {
     ];
 }
 
-double RZSnap(double v) { return round(v * 100) / 100; }
+// DELIBERATE BREAK — reverted in the next commit.
+double RZSnap(double v) { return round(v * 10) / 10; }
 
 #pragma mark - Coordinates
 
