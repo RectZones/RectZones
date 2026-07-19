@@ -108,9 +108,29 @@ Small fixes can go straight to a pull request. For a new feature, open an issue 
 we can agree on the shape. Every PR is built on macOS in CI and squash-merged as a single
 commit.
 
-Found a security problem? Please report it privately — see [SECURITY.md](SECURITY.md),
-which also documents exactly what the app does on your machine (no network access, no
-dependencies, listen-only event tap) and how to verify the build.
+Found a security problem? Please report it privately — see [SECURITY.md](SECURITY.md).
+
+## Is it safe?
+
+Fair question to ask of any app that wants Accessibility permission.
+**[SECURITY.md](SECURITY.md) answers it in detail**, and every claim there is one you
+can check yourself. The short version:
+
+- **You build it from source you can read.** We do not hand you a binary.
+- **No network access at all** — no updater, no telemetry, no analytics. Verify with
+  Little Snitch or `lsof -i`.
+- **No dependencies**, so there is no supply chain to compromise.
+- **The event tap is listen-only.** It is not a keylogger.
+- **The build is reproducible**: run `./build.sh` twice and the two binaries are
+  byte-identical, which means the app is a pure function of the source with nothing
+  hidden mixed in. CI enforces this on every change.
+- **Every change is checked automatically** — build, bundle validation, reproducibility
+  and Clang's static analyzer — before it can reach `main`.
+
+It also explains what RectZones is *not*: there is no Apple notarization ticket and no
+commercial antivirus certification, and [why GitHub's CodeQL cannot be used
+here](SECURITY.md#why-there-is-no-codeql) (it does not support Objective-C), so you are
+not left wondering why the Security tab looks empty.
 
 ## Lineage — relationship to Rectangle
 
