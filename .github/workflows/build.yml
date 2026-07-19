@@ -1,0 +1,77 @@
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege. Fork PRs get a read-only token and no secrets anyway
+# (this is `pull_request`, not `pull_request_target`), but pin it explicitly.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build the app bundle
+        run: ./build.sh
+
+      - name: Verify the bundle is well formed
+        run: |
+          APP=build/RectZones.app
+          test -x "$APP/Contents/MacOS/RectZones"     || { echo "missing executable"; exit 1; }
+          test -f "$APP/Contents/Info.plist"          || { echo "missing Info.plist"; exit 1; }
+          test -f "$APP/Contents/Resources/AppIcon.icns" || { echo "missing icon"; exit 1; }
+          plutil -lint "$APP/Contents/Info.plist"
+          codesign --verify --verbose=2 "$APP"
+
+      - name: Build is reproducible
+        run: |
+          # An unchanged src/main.m must produce a byte-identical binary —
+          # this is what lets a user's Accessibility grant survive a rebuild,
+          # and what makes a released binary verifiable against source.
+          shasum -a 256 build/RectZones.app/Contents/MacOS/RectZones > /tmp/first.sha
+          ./build.sh > /dev/null
+          shasum -a 256 build/RectZones.app/Contents/MacOS/RectZones > /tmp/second.sha
+          if ! diff <(cut -d' ' -f1 /tmp/first.sha) <(cut -d' ' -f1 /tmp/second.sha); then
+            echo "::error::Rebuild produced a different binary — reproducibility is broken."
+            exit 1
+          fi
+          echo "Reproducible: $(cut -d' ' -f1 /tmp/first.sha)"
+
+      - name: Snapshot renderer still compiles
+        run: |
+          clang -DRZ_SNAPSHOT -fobjc-arc src/main.m -o /tmp/rz-snap \
+            -framework Cocoa -framework Carbon -framework ApplicationServices
+
+  analyze:
+    name: static analysis
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Clang static analyzer
+        run: |
+          # CodeQL does not support Objective-C (it is excluded from the c-cpp
+          # extractor), so Clang's analyzer is our static analysis gate. This is
+          # currently clean and must stay clean — any finding fails the build.
+          # No -framework flags: --analyze does not link, and they would trip
+          # -Wunused-command-line-argument under -Werror.
+          clang --analyze -fobjc-arc \
+            -Xclang -analyzer-output=text \
+            -Werror \
+            src/main.m
+
+      - name: Compiler warnings
+        # Informational, not a gate: the tree has one known -Wunused-function
+        # warning (RZTriggerSymbol). Once that is cleaned up, drop
+        # `continue-on-error` and add -Werror so warnings cannot creep back in.
+        continue-on-error: true
+        run: |
+          clang -O2 -fobjc-arc -Wall -Wextra \
+            -Wno-unused-parameter \
+            -fsyntax-only src/main.m

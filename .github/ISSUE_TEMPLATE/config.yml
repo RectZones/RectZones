@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Installation or usage question
+    url: https://github.com/RectZones/RectZones#troubleshooting
+    about: >
+      The README troubleshooting section covers the permission-after-rebuild
+      problem, conflicts with macOS tiling and other window managers, remapped
+      modifier keys, and shortcut conflicts. Most questions are answered there.
+  # No security entry here on purpose: GitHub adds its own "Report a security
+  # vulnerability" link automatically because private vulnerability reporting is
+  # enabled and SECURITY.md exists. Adding one here duplicates it.

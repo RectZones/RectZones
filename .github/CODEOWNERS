@@ -1,0 +1,5 @@
+# Reviewers automatically requested on every pull request.
+# Owners must have write access to the repository, or the request is silently
+# dropped. Last matching pattern wins — there is only one pattern here.
+
+* @Devopsventure @FurkaanBoraa
