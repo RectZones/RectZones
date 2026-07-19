@@ -15,7 +15,7 @@ jobs:
     name: build
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Build the app bundle
         run: ./build.sh
@@ -52,7 +52,7 @@ jobs:
     name: static analysis
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Clang static analyzer
         run: |
