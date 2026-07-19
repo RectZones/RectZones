@@ -45,7 +45,7 @@ jobs:
 
       - name: Snapshot renderer still compiles
         run: |
-          clang -DRZ_SNAPSHOT -fobjc-arc src/main.m -o /tmp/rz-snap \
+          clang -DRZ_SNAPSHOT -fobjc-arc src/main.m src/rzcore.m -o /tmp/rz-snap \
             -framework Cocoa -framework Carbon -framework ApplicationServices
 
   analyze:
@@ -64,7 +64,7 @@ jobs:
           clang --analyze -fobjc-arc \
             -Xclang -analyzer-output=text \
             -Werror \
-            src/main.m
+            src/main.m src/rzcore.m
 
       - name: Compiler warnings
         # Informational, not a gate: the tree has one known -Wunused-function
@@ -74,4 +74,4 @@ jobs:
         run: |
           clang -O2 -fobjc-arc -Wall -Wextra \
             -Wno-unused-parameter \
-            -fsyntax-only src/main.m
+            -fsyntax-only src/main.m src/rzcore.m
