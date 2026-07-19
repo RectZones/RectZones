@@ -87,11 +87,18 @@ binary — verify it yourself in two commands:
 # the two hashes are identical
 ```
 
-This is not a party trick. It means the binary is a pure function of the source:
-there is no hidden input, no build-time randomness, and nothing that could vary
-between your machine and ours. If we ever publish a prebuilt `.app`, you can
-check it against the tagged source by building it and comparing hashes — a claim
-that is meaningless without reproducibility, and checkable with it.
+This is not a party trick. It means the binary is a pure function of the source
+and the compiler flags: there is no build-time randomness and no hidden state.
+Verified that it does not depend on where you build — the same source in a
+different directory produces the same hash.
+
+One honest limit. Reproducibility holds for builds made **the same way** — with
+`./build.sh` and the flags it sets. A build environment that injects its own
+compiler or linker flags produces a different, equally valid binary. Homebrew
+does exactly this, so an app installed through a `brew` formula will *not* hash
+identically to one you build by hand, even from the same source and version. Both
+are honest builds of the same code; the hash comparison simply is not the right
+tool across differing toolchain settings. Compare like with like.
 
 Precisely, the binary is determined by the source **and the version string**. The
 ad-hoc signature covers `Info.plist`, so bumping the version changes the hash even
