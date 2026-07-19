@@ -74,10 +74,88 @@ open build/RectZones.app
    title-strip allowance; the maximize band stays tight, since it lacks the side-edge
    requirement that keeps corners from misfiring.
 
+## Landing a change
+
+`main` is protected. Nobody pushes to it directly — including maintainers.
+
+```bash
+git checkout -b short-descriptive-branch-name
+# ... work ...
+git push -u origin short-descriptive-branch-name
+gh pr create
+```
+
+- **Squash merge only.** Merge commits and rebase merges are disabled, so each PR
+  becomes exactly one commit on `main` and the PR title becomes the commit message.
+  Intermediate commits on your branch are fine — they disappear on merge.
+- **Force pushing `main` is blocked**, and should stay that way now that the repo
+  accepts outside contributions: it invalidates open PRs and diverges forks. (This is
+  not hypothetical — an early force push closed a Dependabot PR.)
+- Two required checks, both on `macos-latest` (`.github/workflows/build.yml`):
+  - **`build`** — runs `build.sh`, validates the bundle and its signature, then builds a
+    second time and fails if the binary is not byte-identical. Reproducibility is a
+    feature, not a nicety: it is what lets an unchanged source tree keep its
+    Accessibility grant across rebuilds.
+  - **`static analysis`** — `clang --analyze` with `-Werror`, currently clean and
+    expected to stay clean. **CodeQL cannot be used on this project** — it does not
+    support Objective-C (excluded from the `c-cpp` extractor), so enabling code scanning
+    would produce a silent no-op. Clang's analyzer is the substitute.
+    Note: pass no `-framework` flags to `--analyze`; it does not link, and under
+    `-Werror` they become "unused linker input" errors.
+  - A third, non-blocking step reports `-Wall -Wextra` warnings. It is
+    `continue-on-error` because of one known dead function (`RZTriggerSymbol`). Clean
+    that up and the step can become a real gate.
+- Contributor-facing guidance lives in [CONTRIBUTING.md](CONTRIBUTING.md); what the app
+  does on a user's machine, and how to verify a build, is in [SECURITY.md](SECURITY.md).
+
+## Distribution — decided, and why
+
+RectZones ships **source, not binaries**, and that is a deliberate security position
+rather than an unfinished chore.
+
+macOS applies the `com.apple.quarantine` attribute only to files a *downloading*
+application fetched. An app the user compiles locally is never quarantined, so the
+ad-hoc signature is sufficient and Gatekeeper never fires. Publishing a prebuilt archive
+would manufacture a problem the project does not currently have: the download arrives
+quarantined, the ad-hoc signature fails Gatekeeper, and the user gets "damaged and can't
+be opened" with no supported workaround.
+
+Consequences worth knowing before proposing packaging work:
+
+- **A Homebrew *cask* is the wrong vehicle** — casks install a prebuilt archive and
+  cannot build from source.
+- **Upstream `homebrew-cask` is closed** to this project on three independent counts:
+  the self-submission notability bar (90 forks / 90 watchers / 225 stars), the absence
+  of a prebuilt artifact, and the ad-hoc signature — Homebrew disables casks that fail
+  Gatekeeper checks from 1 September 2026.
+- **Upstream `homebrew-core` is closed structurally**, regardless of popularity:
+  "Don't make your formula build an `.app`".
+- **The route that works is a *formula* in our own tap**,
+  [RectZones/homebrew-tap](https://github.com/RectZones/homebrew-tap). It builds from
+  source on the user's machine, so it keeps the no-quarantine property, gives a one-line
+  install, and is subject to none of the official repositories' acceptance policies.
+  Install with the fully-qualified name — `brew install RectZones/tap/rectzones` —
+  because Homebrew 6.0's tap trust otherwise requires an explicit `brew trust`.
+
+Changing the **bundle identifier** (`app.rectzones.RectZones`) is a breaking act: the
+ad-hoc signature embeds it in the code directory, so the binary hash changes even with
+unchanged source, and the Accessibility grant is keyed to it. It must not change again
+outside a deliberate, announced migration.
+
 ## Roadmap / open items
 
 - Launch at login (`SMAppService`).
 - Rectangle parity extras: previous display, center, restore.
 - Per-screen templates (currently one template applies to all screens).
-- Signed team distribution (Developer ID + notarization) if the team ever wants
-  prebuilt binaries instead of building from source.
+- Test coverage. There is none, and the single-file layout is the obstacle: there is no
+  separable unit to test. The agreed direction is to lift the pure logic — zone
+  geometry, placement math, config read/write — out of the UI and syscall paths into a
+  second file that `build.sh` also compiles, with the test runner as another `clang`
+  target. **Not** a migration to SwiftPM or an Xcode project: that is the toolchain the
+  project could not use in the first place (see "Why the project looks like this"), and
+  it puts the reproducible build at risk.
+- Release process: version is currently hardcoded in `build.sh` (`0.1`) and should be
+  derived from the git tag instead. No releases or tags exist yet.
+- Signed distribution (Developer ID + notarization, $99/year) — only becomes worth
+  discussing if prebuilt binaries are ever wanted. It is a prerequisite for any upstream
+  cask, but that also needs 225+ stars, so it is not a near-term question.
