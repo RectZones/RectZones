@@ -16,6 +16,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # build.sh reads the version from the nearest tag; the default
+          # checkout fetches none, which would stamp every CI build 0.0.0.
+          fetch-depth: 0
 
       - name: Build the app bundle
         run: ./build.sh
