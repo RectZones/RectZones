@@ -36,7 +36,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 clang -O2 -fobjc-arc \
-  "$DIR/src/main.m" \
+  "$DIR/src/main.m" "$DIR/src/rzcore.m" \
   -o "$APP/Contents/MacOS/RectZones" \
   -framework Cocoa -framework ApplicationServices -framework Carbon
 

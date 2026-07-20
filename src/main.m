@@ -6,6 +6,10 @@
 #import <ApplicationServices/ApplicationServices.h>
 #import <Carbon/Carbon.h>
 
+// Zone geometry, placement math and config encoding. Kept free of AppKit and the
+// filesystem so the test target can link it on its own — see src/rzcore.h.
+#import "rzcore.h"
+
 // Diagnostic log: /tmp/rectzones.log — see what actually happened when debugging.
 static void RZLog(NSString *fmt, ...) {
     static NSDateFormatter *df;
@@ -24,34 +28,13 @@ static void RZLog(NSString *fmt, ...) {
 
 #pragma mark - Model
 
-// Zone: relative to the screen's visible area (0-1), origin TOP-LEFT.
-static NSMutableDictionary *RZZone(double x, double y, double w, double h) {
-    return [@{@"x": @(x), @"y": @(y), @"w": @(w), @"h": @(h)} mutableCopy];
-}
+// RZZone, RZTemplate, RZCopyZones and RZMakeTemplate now live in rzcore.
 
-@interface RZTemplate : NSObject
-@property (nonatomic, copy) NSString *uuid;
-@property (nonatomic, copy) NSString *name;
-@property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *zones;
-@end
-@implementation RZTemplate
-@end
-
-// Deep (mutable) copy of zone dictionaries. valueForKey: on an array of
-// NSDictionary does a dictionary lookup, so an explicit loop is required.
-static NSMutableArray<NSMutableDictionary *> *RZCopyZones(NSArray *zones) {
-    NSMutableArray *out = [NSMutableArray arrayWithCapacity:zones.count];
-    for (NSDictionary *z in zones) [out addObject:[z mutableCopy]];
-    return out;
-}
-
-static RZTemplate *RZMakeTemplate(NSString *name, NSArray *zones) {
-    RZTemplate *t = [RZTemplate new];
-    t.uuid = [[NSUUID UUID] UUIDString];
-    t.name = name;
-    t.zones = RZCopyZones(zones);
-    return t;
-}
+// The modifier values rzcore hardcodes must keep matching AppKit's. rzcore
+// cannot import AppKit without dragging the UI into the test target, so the
+// agreement is checked here, where both definitions are visible.
+_Static_assert(RZModControl == NSEventModifierFlagControl, "RZModControl drifted from AppKit");
+_Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted from AppKit");
 
 @interface RZStore : NSObject
 @property (nonatomic, strong) NSMutableArray<RZTemplate *> *templates;
@@ -84,51 +67,20 @@ static RZTemplate *RZMakeTemplate(NSString *name, NSArray *zones) {
     return [dir stringByAppendingPathComponent:@"config.json"];
 }
 
-- (NSArray<RZTemplate *> *)presets {
-    double u = 1.0 / 3.0;
-    return @[
-        RZMakeTemplate(@"Halves", @[RZZone(0, 0, .5, 1), RZZone(.5, 0, .5, 1)]),
-        RZMakeTemplate(@"Three Columns", @[RZZone(0, 0, u, 1), RZZone(u, 0, u, 1), RZZone(2 * u, 0, u, 1)]),
-        RZMakeTemplate(@"2×2", @[RZZone(0, 0, .5, .5), RZZone(.5, 0, .5, .5),
-                                 RZZone(0, .5, .5, .5), RZZone(.5, .5, .5, .5)]),
-        RZMakeTemplate(@"Left Wide", @[RZZone(0, 0, .62, 1), RZZone(.62, 0, .38, .5), RZZone(.62, .5, .38, .5)]),
-        RZMakeTemplate(@"Sixths (3×2)", @[RZZone(0, 0, u, .5), RZZone(u, 0, u, .5), RZZone(2 * u, 0, u, .5),
-                                          RZZone(0, .5, u, .5), RZZone(u, .5, u, .5), RZZone(2 * u, .5, u, .5)]),
-    ];
-}
-
+// Reading the file is this class's job; making sense of what came out of it is
+// rzcore's, so that a mangled config can be tested without one on disk.
 - (void)load {
-    self.templates = [NSMutableArray array];
     NSData *data = [NSData dataWithContentsOfFile:[self path]];
-    NSDictionary *cfg = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-    for (NSDictionary *td in cfg[@"templates"]) {
-        RZTemplate *t = [RZTemplate new];
-        t.uuid = td[@"uuid"] ?: [[NSUUID UUID] UUIDString];
-        t.name = td[@"name"] ?: @"Untitled";
-        t.zones = [NSMutableArray array];
-        for (NSDictionary *z in td[@"zones"]) {
-            [t.zones addObject:[z mutableCopy]];
-        }
-        if (t.zones.count) [self.templates addObject:t];
-    }
-    if (!self.templates.count) {
-        [self.templates addObjectsFromArray:[self presets]];
-    }
-    self.activeUUID = cfg[@"active"] ?: self.templates[0].uuid;
-    if (![self findUUID:self.activeUUID]) self.activeUUID = self.templates[0].uuid;
-    self.trigger = cfg[@"trigger"] ?: @"cmd";
-    self.customKey = [cfg[@"customKey"] integerValue];
-    self.gap = cfg[@"gap"] ? [cfg[@"gap"] integerValue] : 8;
-    self.shortcuts = [NSMutableDictionary dictionary];
-    NSDictionary *sc = cfg[@"shortcuts"];
-    if ([sc isKindOfClass:NSDictionary.class]) {
-        [self.shortcuts addEntriesFromDictionary:sc];
-    } else {
-        // Defaults: ⌃⌥↩ maximize, ⌃⌥→ sixths cycle
-        NSUInteger co = NSEventModifierFlagControl | NSEventModifierFlagOption;
-        self.shortcuts[@"maximize"] = @{@"key": @36,  @"mods": @(co)};
-        self.shortcuts[@"grid32"]   = @{@"key": @124, @"mods": @(co)};
-    }
+    id parsed = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    NSDictionary *cfg = [parsed isKindOfClass:NSDictionary.class] ? parsed : nil;
+
+    self.templates  = RZTemplatesFromConfig(cfg);
+    self.activeUUID = RZResolveActiveUUID([cfg[@"active"] isKindOfClass:NSString.class] ? cfg[@"active"] : nil,
+                                          self.templates);
+    self.trigger    = RZTriggerFromConfig(cfg);
+    self.customKey  = RZCustomKeyFromConfig(cfg);
+    self.gap        = RZGapFromConfig(cfg);
+    self.shortcuts  = RZShortcutsFromConfig(cfg);
     [self save];
 }
 
@@ -143,15 +95,8 @@ static RZTemplate *RZMakeTemplate(NSString *name, NSArray *zones) {
 }
 
 - (void)save {
-    NSMutableArray *ts = [NSMutableArray array];
-    for (RZTemplate *t in self.templates) {
-        [ts addObject:@{@"uuid": t.uuid, @"name": t.name, @"zones": t.zones}];
-    }
-    NSDictionary *cfg = @{@"templates": ts, @"active": self.activeUUID,
-                          @"trigger": self.trigger ?: @"cmd",
-                          @"customKey": @(self.customKey),
-                          @"gap": @(self.gap),
-                          @"shortcuts": self.shortcuts ?: @{}};
+    NSDictionary *cfg = RZConfigDictionary(self.templates, self.activeUUID, self.trigger,
+                                           self.customKey, self.gap, self.shortcuts);
     NSData *data = [NSJSONSerialization dataWithJSONObject:cfg options:NSJSONWritingPrettyPrinted error:nil];
     [data writeToFile:[self path] atomically:YES];
 }
@@ -196,73 +141,37 @@ static CGFloat RZPrimaryHeight(void) {
     return NSMaxY(NSScreen.screens.firstObject.frame);
 }
 
+// These wrappers are the seam: each one reads the live system state — screen
+// geometry, the user's gap setting — and hands it to the pure function in rzcore
+// that does the arithmetic. Call sites are unchanged, and the math is reachable
+// from a test without a display.
+
 static NSPoint RZNSFromCG(CGPoint p) {
-    return NSMakePoint(p.x, RZPrimaryHeight() - p.y);
+    return RZNSPointFromCG(p, RZPrimaryHeight());
 }
 
 static CGRect RZCGFromNS(NSRect r) {
-    return CGRectMake(NSMinX(r), RZPrimaryHeight() - NSMaxY(r), NSWidth(r), NSHeight(r));
+    return RZCGRectFromNS(r, RZPrimaryHeight());
 }
 
 static NSScreen *RZScreenAtCG(CGPoint p) {
-    NSPoint ns = RZNSFromCG(p);
-    for (NSScreen *s in NSScreen.screens)
-        if (NSPointInRect(ns, s.frame)) return s;
-    // Nothing matched, so the cursor sits on a max edge. This is not an exotic case:
-    // a cursor shoved to the top row arrives as CG y == 0, which converts to exactly
-    // NSMaxY(frame), and NSPointInRect treats the max edge as OUTSIDE — so the topmost
-    // row of the screen resolved to no screen at all and both the zone overlay and
-    // edge snapping went dead precisely where the user aims for a top corner. (The
-    // other three edges are unaffected: the cursor clamps to width-1 / height-1 there,
-    // never to the exclusive bound.) Retry with the max edges included — strict
-    // containment already had its pass, so no screen that owns the point loses it.
-    for (NSScreen *s in NSScreen.screens) {
-        NSRect f = s.frame;
-        if (ns.x >= NSMinX(f) && ns.x <= NSMaxX(f) &&
-            ns.y >= NSMinY(f) && ns.y <= NSMaxY(f)) return s;
-    }
-    return nil;
+    NSArray<NSScreen *> *screens = NSScreen.screens;
+    NSMutableArray<NSValue *> *frames = [NSMutableArray arrayWithCapacity:screens.count];
+    for (NSScreen *s in screens) [frames addObject:[NSValue valueWithRect:s.frame]];
+    NSInteger i = RZScreenIndexAtPoint(RZNSFromCG(p), frames);
+    return i < 0 ? nil : screens[(NSUInteger)i];
 }
 
-// Placement gap: insets the target rect on all sides (like Rectangle's gaps).
 static NSRect RZPaddedNS(NSRect r) {
-    CGFloat g = (CGFloat)RZStore.shared.gap;
-    if (g > 0 && r.size.width > 3 * g && r.size.height > 3 * g) {
-        return NSInsetRect(r, g, g);
-    }
-    return r;
+    return RZPadRect(r, (CGFloat)RZStore.shared.gap);
 }
 
-// The zone's AppKit rect on the given screen.
 static NSRect RZZoneNSRect(NSDictionary *z, NSScreen *screen) {
-    NSRect vf = screen.visibleFrame;
-    double zx = [z[@"x"] doubleValue], zy = [z[@"y"] doubleValue];
-    double zw = [z[@"w"] doubleValue], zh = [z[@"h"] doubleValue];
-    return NSMakeRect(NSMinX(vf) + zx * NSWidth(vf),
-                      NSMinY(vf) + (1 - zy - zh) * NSHeight(vf),
-                      zw * NSWidth(vf), zh * NSHeight(vf));
+    return RZZoneRectInFrame(z, screen.visibleFrame);
 }
 
 static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
-    NSPoint ns = RZNSFromCG(p);
-    NSRect vf = screen.visibleFrame;
-    if (NSWidth(vf) <= 0 || NSHeight(vf) <= 0) return -1;
-    double rx = (ns.x - NSMinX(vf)) / NSWidth(vf);
-    double ry = (NSMaxY(vf) - ns.y) / NSHeight(vf); // ratio from top
-    // Zones span visibleFrame, but the cursor roams the whole frame: pushed into the
-    // menu bar ry goes negative, over the Dock it passes 1, and nothing matched — the
-    // overlay simply stopped highlighting at the exact moment the user shoved the
-    // window into a top corner. Clamp instead: the strip above the zones belongs to
-    // the top row, the strip below to the bottom row.
-    rx = fmin(fmax(rx, 0.0), 1.0);
-    ry = fmin(fmax(ry, 0.0), 1.0);
-    for (NSUInteger i = 0; i < zones.count; i++) {
-        NSDictionary *z = zones[i];
-        double zx = [z[@"x"] doubleValue], zy = [z[@"y"] doubleValue];
-        double zw = [z[@"w"] doubleValue], zh = [z[@"h"] doubleValue];
-        if (rx >= zx && rx <= zx + zw && ry >= zy && ry <= zy + zh) return (NSInteger)i;
-    }
-    return -1;
+    return RZZoneIndexAtPoint(RZNSFromCG(p), screen.visibleFrame, zones);
 }
 
 #pragma mark - Overlay
@@ -1260,7 +1169,6 @@ static OSStatus RZHotKeyHandler(EventHandlerCallRef next, EventRef event, void *
     self.needsDisplay = YES;
 }
 
-static double RZSnap(double v) { return round(v * 100) / 100; }
 
 - (void)mouseDragged:(NSEvent *)event {
     if (self.selectedZone < 0 || self.selectedZone >= (NSInteger)self.zones.count || self.mode == 0) return;
