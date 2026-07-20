@@ -93,9 +93,13 @@ placement). Config: `~/Library/Application Support/RectZones/config.json`.
 
 - Architecture, dev loop, hard-won gotchas: [AGENTS.md](AGENTS.md)
 - Fresh-install runbook for agents: [SETUP.md](SETUP.md)
-- The whole app is `src/main.m`; `./build.sh` produces the bundle with the icon.
-  Screenshots in `docs/` are generated from the real UI: `clang -DRZ_SNAPSHOT …` (see the
-  bottom of `main.m`).
+- The app is `src/main.m` plus `src/rzcore.m`; `./build.sh` produces the bundle with the
+  icon. Screenshots in `docs/` are generated from the real UI: `clang -DRZ_SNAPSHOT …`
+  (see the bottom of `main.m`).
+- **Run the tests with `./test.sh`.** They cover `src/rzcore.m` — zone geometry, placement
+  math and config handling — and build as a separate `clang` target that links only
+  Foundation, so they need no display, no Accessibility grant and no running app, and the
+  app's own build stays byte-for-byte unchanged.
 
 ## Contributing
 
