@@ -178,6 +178,32 @@ those weekly.
 
 This removes an entire class of risk: there is no supply chain to compromise.
 
+### Secret scanning
+
+Three repository-level protections are enabled:
+
+| Protection | State | What it does |
+|---|---|---|
+| **Secret scanning** | on | Scans the repository for credentials matching known provider patterns — AWS keys, GitHub tokens, and so on — and alerts on a match. |
+| **Push protection** | on | Blocks a push that would introduce one of those secrets, rather than alerting after it is already in the history. |
+| **Dependabot security updates** | on | Opens a pull request when a dependency has a known advisory. In practice this covers the GitHub Actions above, since the app has no dependencies. |
+
+Two sub-features are **off**, and it is worth knowing which:
+
+- **Non-provider pattern scanning** — off. Detection is limited to the patterns
+  of known providers. A generic secret that matches no provider format — a
+  private key pasted into a file, an internal password, a bespoke token — is
+  **not** caught. Treat push protection as a safety net for the obvious cases,
+  not as a guarantee that nothing sensitive can land.
+- **Validity checks** — off. When a provider credential is found, GitHub does
+  not test whether it is still live. An alert therefore tells you a secret
+  matching a known shape is present; it does not tell you whether it still
+  works. Assume any hit is live until you have revoked it.
+
+Neither gap changes what you should do on a hit: rotate the credential, then
+clean the history. Both are listed here because a reader deciding how much to
+trust this repository needs the off switches as much as the on ones.
+
 ## Scope
 
 In scope: anything that lets RectZones be used to escalate privileges, exfiltrate
