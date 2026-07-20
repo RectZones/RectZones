@@ -223,7 +223,7 @@ static void test_config(void) {
     ok([RZTriggerFromConfig(@{@"trigger": @"fn"}) isEqualToString:@"fn"], "explicit trigger is read");
 
     group("config round trip");
-    NSDictionary *cfg = RZConfigDictionary(RZPresetTemplates(), @"abc", @"alt", 7, 12, RZDefaultShortcuts());
+    NSDictionary *cfg = RZConfigDictionary(RZPresetTemplates(), @"abc", nil, @"alt", 7, 12, RZDefaultShortcuts());
     ok([NSJSONSerialization isValidJSONObject:cfg], "encoded config is serialisable");
     eqi((NSInteger)[cfg[@"templates"] count], 5, "all templates encoded");
     ok([cfg[@"trigger"] isEqualToString:@"alt"], "trigger encoded");
@@ -283,6 +283,48 @@ static void test_config(void) {
     ok([RZResolveActiveUUID(@"missing", ts) isEqualToString:ts[0].uuid], "a dangling uuid falls back to the first");
     ok([RZResolveActiveUUID(nil, ts) isEqualToString:ts[0].uuid], "no uuid falls back to the first");
     ok(RZResolveActiveUUID(@"anything", @[]) == nil, "no templates yields nil rather than a crash");
+
+    group("orientation");
+    ok(!RZFrameIsPortrait(NSMakeRect(0, 0, 2560, 1607)), "a wide display is landscape");
+    ok(RZFrameIsPortrait(NSMakeRect(2560, 0, 1080, 1920)), "a rotated display is portrait");
+    ok(!RZFrameIsPortrait(NSMakeRect(0, 0, 1000, 1000)), "square counts as landscape, not a third case");
+    ok(!RZFrameIsPortrait(NSMakeRect(-1920, 25, 1920, 1055)), "orientation ignores where the screen sits");
+    ok(RZFrameIsPortrait(NSMakeRect(0, 0, 0, 10)), "a degenerate frame still answers rather than trapping");
+
+    group("per-orientation template selection");
+    // A config written before this feature existed has only "active". Both
+    // orientations must resolve to it, so nothing changes for anyone who has not
+    // asked for a portrait template.
+    NSDictionary *legacy = @{@"active": @"aaa"};
+    ok([RZActiveUUIDFromConfig(legacy, NO) isEqualToString:@"aaa"], "old config: landscape uses the single choice");
+    ok([RZActiveUUIDFromConfig(legacy, YES) isEqualToString:@"aaa"], "old config: portrait uses it too");
+
+    NSDictionary *split = @{@"active": @"aaa", @"activePortrait": @"bbb"};
+    ok([RZActiveUUIDFromConfig(split, NO) isEqualToString:@"aaa"], "split config: landscape");
+    ok([RZActiveUUIDFromConfig(split, YES) isEqualToString:@"bbb"], "split config: portrait");
+
+    // Wrong types must not take the app down, and must not invent a binding.
+    ok(RZActiveUUIDFromConfig(@{@"active": @42, @"activePortrait": @[]}, YES) == nil,
+       "garbage in both fields yields no choice rather than a crash");
+    ok([RZActiveUUIDFromConfig(@{@"active": @"aaa", @"activePortrait": @7}, YES) isEqualToString:@"aaa"],
+       "a garbage portrait field falls back to landscape");
+    ok(RZActiveUUIDFromConfig(nil, YES) == nil, "no config yields no choice");
+
+    group("per-orientation encoding");
+    NSArray<RZTemplate *> *ps = RZPresetTemplates();
+    // Absent, not mirrored: an older build must not meet a key it cannot read,
+    // and "no portrait template" has to survive a round trip as absent.
+    NSDictionary *noSplit = RZConfigDictionary(ps, @"aaa", nil, @"cmd", 0, 8, RZDefaultShortcuts());
+    ok(noSplit[@"activePortrait"] == nil, "no portrait template writes no key at all");
+    ok([RZActiveUUIDFromConfig(noSplit, YES) isEqualToString:@"aaa"], "and still reads back as one template everywhere");
+
+    NSDictionary *withSplit = RZConfigDictionary(ps, @"aaa", @"bbb", @"cmd", 0, 8, RZDefaultShortcuts());
+    ok([withSplit[@"activePortrait"] isEqualToString:@"bbb"], "a portrait template is written");
+    ok([RZActiveUUIDFromConfig(withSplit, YES) isEqualToString:@"bbb"], "and reads back");
+    ok([RZActiveUUIDFromConfig(withSplit, NO) isEqualToString:@"aaa"], "without disturbing landscape");
+    ok([NSJSONSerialization isValidJSONObject:withSplit], "still serialisable");
+    ok(RZConfigDictionary(ps, @"aaa", @"", @"cmd", 0, 8, nil)[@"activePortrait"] == nil,
+       "an empty portrait uuid is treated as unset, not written as an empty string");
 
     group("zone model");
     NSArray *orig = @[RZZone(0, 0, .5, 1)];
