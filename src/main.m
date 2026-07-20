@@ -1628,22 +1628,37 @@ static RZApp *gApp;
     NSArray *actions = RZActions();
     CGFloat rowH = 30, pad = 14;
     CGFloat h = pad * 2 + rowH * actions.count + 46;
-    NSRect frame = NSMakeRect(0, 0, 560, h);
+    const CGFloat width = 560;
+    NSRect frame = NSMakeRect(0, 0, width, h);
     NSView *c = [[NSView alloc] initWithFrame:frame];
+
+    // One block, four columns, centred as a unit. The x positions used to be
+    // written out per control, which left the content ending 42 pt from the right
+    // edge but starting 14 pt from the left — a third of the margin on one side.
+    // Deriving them means the block cannot drift out of alignment again, and the
+    // intro text below shares the same left and right edges as the rows.
+    const CGFloat labelW = 278, miniW = 36, comboW = 140, clearW = 32;
+    const CGFloat labelToMini = 4, miniToCombo = 8, comboToClear = 6;
+    const CGFloat contentW = labelW + labelToMini + miniW + miniToCombo
+                           + comboW + comboToClear + clearW;
+    const CGFloat left    = round((width - contentW) / 2);
+    const CGFloat miniX   = left + labelW + labelToMini;
+    const CGFloat comboX  = miniX + miniW + miniToCombo;
+    const CGFloat clearX  = comboX + comboW + comboToClear;
 
     NSTextField *info = [NSTextField wrappingLabelWithString:
         @"Click a shortcut button, then press your key combo (⎋ to cancel). "
         @"Cycling: pressing the same combo again moves the window to the next cell of that grid."];
     info.font = [NSFont systemFontOfSize:11];
     info.textColor = NSColor.secondaryLabelColor;
-    info.frame = NSMakeRect(pad, h - 40, frame.size.width - 2 * pad, 30);
+    info.frame = NSMakeRect(left, h - 40, contentW, 30);
     [c addSubview:info];
 
     CGFloat y = h - 52 - rowH;
     for (NSArray *a in actions) {
         NSString *aid = a[0];
         NSTextField *label = [NSTextField labelWithString:a[1]];
-        label.frame = NSMakeRect(pad, y + 5, 278, 20);
+        label.frame = NSMakeRect(left, y + 5, labelW, 20);
         label.font = [NSFont systemFontOfSize:12];
         [c addSubview:label];
 
@@ -1651,7 +1666,7 @@ static RZApp *gApp;
             [aid isEqualToString:@"maximize"] || [aid isEqualToString:@"almostMax"] ||
             [aid isEqualToString:@"twoThirds"] || [aid isEqualToString:@"displayNext"] ||
             [aid isEqualToString:@"cornerHop"]) {
-            RZMiniGridView *mini = [[RZMiniGridView alloc] initWithFrame:NSMakeRect(296, y + 2, 36, 22)];
+            RZMiniGridView *mini = [[RZMiniGridView alloc] initWithFrame:NSMakeRect(miniX, y + 2, miniW, 22)];
             if ([aid isEqualToString:@"displayNext"]) {
                 mini.arrowMode = YES;
             } else if ([aid isEqualToString:@"cornerHop"]) {
@@ -1673,14 +1688,14 @@ static RZApp *gApp;
 
         NSButton *combo = [NSButton buttonWithTitle:@"—" target:self action:@selector(recordPressed:)];
         combo.bezelStyle = NSBezelStyleRounded;
-        combo.frame = NSMakeRect(340, y, 140, 26);
+        combo.frame = NSMakeRect(comboX, y, comboW, 26);
         combo.identifier = aid;
         [c addSubview:combo];
         self.comboButtons[aid] = combo;
 
         NSButton *clear = [NSButton buttonWithTitle:@"✕" target:self action:@selector(clearPressed:)];
         clear.bezelStyle = NSBezelStyleRounded;
-        clear.frame = NSMakeRect(486, y, 32, 26);
+        clear.frame = NSMakeRect(clearX, y, clearW, 26);
         clear.identifier = aid;
         [c addSubview:clear];
 
@@ -1985,7 +2000,7 @@ int main(int argc, const char *argv[]) {
 #ifdef RZ_SNAPSHOT
 #pragma mark - README screenshot generator
 // Renders the real UI views to PNG offscreen (for README/docs).
-// Derleme: clang -DRZ_SNAPSHOT -fobjc-arc src/main.m -o /tmp/rz-snap \
+// Derleme: clang -DRZ_SNAPSHOT -fobjc-arc src/main.m src/rzcore.m -o /tmp/rz-snap \
 //          -framework Cocoa -framework Carbon -framework ApplicationServices
 
 @interface RZSettings (RZSnap)
