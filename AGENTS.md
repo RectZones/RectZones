@@ -43,10 +43,20 @@ open build/RectZones.app
   System Settings → Privacy & Security → Accessibility → select **RectZones** → **−**
   to remove the row → **+** and add
   `build/RectZones.app` back. Cannot be automated — batch changes into one build.
-- The build is reproducible: rebuilding with `src/main.m` unchanged yields a byte-identical
-  binary, so the cdhash — and the grant — survive. Only a real source change costs a
-  permission cycle. Verify with `codesign -dv --verbose=4 build/RectZones.app` before
-  putting the user through the steps above.
+- The build is reproducible: rebuilding an unchanged source tree yields a byte-identical
+  binary, so the cdhash — and the grant — survive. State the invariant precisely: it is
+  *unchanged source **and** unchanged `Info.plist`*. Ad-hoc signing folds the plist into the
+  code directory through a special slot, so the version string is part of the binary hash.
+  Measured — same code, only the version changed:
+
+  ```
+  0.1   -> 41cdcf4d8a68c2820f82824880ae32b9624314be97b7049466575f9485a7f99a
+  1.0.0 -> ae90194fb4c749de1e9ab90ebb0088cc6d004d9794ff0fa4c8c5b40d5598c541
+  ```
+
+  So **every version bump costs users one Accessibility re-grant** — the same one-time price
+  as the bundle id change, and a known release cost rather than a support surprise. Verify with
+  `codesign -dv --verbose=4 build/RectZones.app` before putting the user through the steps above.
 - **Do not propose stable/self-signed code signing to survive rebuilds.** It would work,
   but the user has declined it more than once and does not want to be asked again. The
   remove-and-re-add step above is the accepted cost of an ad-hoc build.
@@ -76,7 +86,14 @@ open build/RectZones.app
 
 ## Landing a change
 
-`main` is protected. Nobody pushes to it directly — including maintainers.
+`main` is protected: no direct pushes, and every change lands through a pull request with
+**one approving review** — the first thing an outside contributor needs to know.
+
+State the limit honestly: admins can bypass the rules, and that is reserved for unblocking a
+release, not for routine work. It has been used once, on PR #4 (bundle identifier), which had
+to be on `main` before any tag could exist; it was authored and merged by the same account with
+zero reviews. A contributor who later finds an unreviewed commit in the history should find it
+explained here rather than contradicted.
 
 ```bash
 git checkout -b short-descriptive-branch-name
@@ -94,17 +111,20 @@ gh pr create
 - Two required checks, both on `macos-latest` (`.github/workflows/build.yml`):
   - **`build`** — runs `build.sh`, validates the bundle and its signature, then builds a
     second time and fails if the binary is not byte-identical. Reproducibility is a
-    feature, not a nicety: it is what lets an unchanged source tree keep its
-    Accessibility grant across rebuilds.
+    feature, not a nicety: it is what lets an unchanged source tree — **and an
+    unchanged `Info.plist`** — keep its Accessibility grant across rebuilds. See
+    "Development loop" for why the version string counts.
   - **`static analysis`** — `clang --analyze` with `-Werror`, currently clean and
     expected to stay clean. **CodeQL cannot be used on this project** — it does not
     support Objective-C (excluded from the `c-cpp` extractor), so enabling code scanning
     would produce a silent no-op. Clang's analyzer is the substitute.
     Note: pass no `-framework` flags to `--analyze`; it does not link, and under
     `-Werror` they become "unused linker input" errors.
-  - A third, non-blocking step reports `-Wall -Wextra` warnings. It is
-    `continue-on-error` because of one known dead function (`RZTriggerSymbol`). Clean
-    that up and the step can become a real gate.
+  - A third step reports `-Wall -Wextra` warnings over `src/main.m src/rzcore.m`. It is
+    still `continue-on-error` on `main`, held there by one dead function
+    (`RZTriggerSymbol`); PR #6 deletes it and adds `-Werror`, which turns the step into a
+    real gate. `-Wno-unused-parameter` stays either way — Cocoa callbacks hand us
+    arguments we are not required to read. Update this paragraph when #6 lands.
 - Contributor-facing guidance lives in [CONTRIBUTING.md](CONTRIBUTING.md); what the app
   does on a user's machine, and how to verify a build, is in [SECURITY.md](SECURITY.md).
 
@@ -147,15 +167,26 @@ outside a deliberate, announced migration.
 - Launch at login (`SMAppService`).
 - Rectangle parity extras: previous display, center, restore.
 - Per-screen templates (currently one template applies to all screens).
-- Test coverage. There is none, and the single-file layout is the obstacle: there is no
-  separable unit to test. The agreed direction is to lift the pure logic — zone
-  geometry, placement math, config read/write — out of the UI and syscall paths into a
-  second file that `build.sh` also compiles, with the test runner as another `clang`
-  target. **Not** a migration to SwiftPM or an Xcode project: that is the toolchain the
-  project could not use in the first place (see "Why the project looks like this"), and
-  it puts the reproducible build at risk.
-- Release process: version is currently hardcoded in `build.sh` (`0.1`) and should be
-  derived from the git tag instead. No releases or tags exist yet.
+- ~~Test coverage.~~ **Done.** The pure logic — zone geometry, placement math, config
+  read/write — now lives in `src/rzcore.m`, which `build.sh` compiles alongside
+  `src/main.m`; the test runner is a separate `clang` target (`test.sh`) that links only
+  `rzcore.m` and Foundation, so it needs no display and does not disturb the app binary the
+  reproducibility check hashes. It runs in CI. This was deliberately **not** a migration to
+  SwiftPM or an Xcode project: that is the toolchain the project could not use in the first
+  place (see "Why the project looks like this"), and it would put the reproducible build at risk.
+- ~~Release process: version hardcoded in `build.sh`.~~ **Done.** The version now derives from
+  the nearest git tag (`v1.0.0` → `1.0.0`), with `RZ_VERSION` as an explicit override. That
+  override is not a convenience: a build from a source tarball has no git metadata to read, and
+  a tarball is exactly what a Homebrew formula consumes — without it the formula would stamp a
+  different version and therefore produce a different binary than the tagged checkout, quietly
+  breaking the "verify your build against the release" property this document is selling. CI
+  checks out with `fetch-depth: 0` so builds are not stamped `0.0.0`. No releases or tags exist yet.
+- **No `development` branch** — decided, not an oversight. Squash plus a green-CI gate already
+  keeps `main` releasable; a second branch is a second merge surface and a second protection
+  rule, and the ruleset only covers the default branch, so `development` would sit unprotected.
+  Revisit only if contribution volume ever justifies it.
+- **Admin access is not being requested** for the maintainer. Maintain is sufficient now that
+  protection is configured; settings changes go through the repository owner.
 - Signed distribution (Developer ID + notarization, $99/year) — only becomes worth
   discussing if prebuilt binaries are ever wanted. It is a prerequisite for any upstream
   cask, but that also needs 225+ stars, so it is not a near-term question.
