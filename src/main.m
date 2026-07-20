@@ -1894,6 +1894,78 @@ static RZApp *gApp;
 
 #pragma mark - Application
 
+// Menu bar icon: a 3x2 zone grid, echoing the app icon, with the top-left cell
+// filled. Drawn here rather than shipped as an asset so there is still no binary
+// blob in the repository — tools/makeicon.m does the same for the app icon.
+//
+// A template image, not text. The old "▦" was a font glyph, so its weight was
+// whatever the system font happened to give it and it never matched the icons
+// beside it. Marking the image as a template hands light/dark, menu bar size and
+// vibrancy to macOS.
+static NSImage *RZMenuBarImage(BOOL trusted) {
+    const CGFloat side = 18;
+    NSImage *img = [NSImage imageWithSize:NSMakeSize(side, side) flipped:NO
+                           drawingHandler:^BOOL(NSRect rect) {
+        // The grid is the same size in both states. Resizing it to make room for
+        // the badge made the icon visibly grow the moment permission was granted;
+        // the badge is overlaid instead, so only the badge appears and disappears.
+        // The canvas is fixed either way, which is what stops the item changing
+        // width — the old two-glyph "▦⚠" was wider than every neighbour.
+        NSRect grid = NSInsetRect(rect, 1.5, 2.5);
+        const NSInteger cols = 3, rows = 2;
+        const CGFloat gap = 1.4;
+        CGFloat cw = (NSWidth(grid) - (cols - 1) * gap) / cols;
+        CGFloat ch = (NSHeight(grid) - (rows - 1) * gap) / rows;
+
+        [NSColor.blackColor set];
+        for (NSInteger r = 0; r < rows; r++) {
+            for (NSInteger c = 0; c < cols; c++) {
+                NSRect cell = NSMakeRect(NSMinX(grid) + c * (cw + gap),
+                                         NSMinY(grid) + r * (ch + gap), cw, ch);
+                NSBezierPath *p = [NSBezierPath bezierPathWithRoundedRect:cell
+                                                                  xRadius:1 yRadius:1];
+                // Top-left cell solid, the rest outlined: the same "one zone is
+                // active" idea the app icon uses.
+                if (r == rows - 1 && c == 0) {
+                    [p fill];
+                } else {
+                    p.lineWidth = 1;
+                    [p stroke];
+                }
+            }
+        }
+
+        if (!trusted) {
+            // Badge in the bottom-right. Punched clear of the grid first so it
+            // reads as sitting on top rather than merging into the cell behind
+            // it — at 18 pt a solid shape touching a stroked one turns to mush.
+            NSBezierPath *warn = [NSBezierPath bezierPath];
+            [warn moveToPoint:NSMakePoint(side - 6.2, 0.0)];
+            [warn lineToPoint:NSMakePoint(side - 0.2, 0.0)];
+            [warn lineToPoint:NSMakePoint(side - 3.2, 5.2)];
+            [warn closePath];
+
+            // Clear a hairline around the triangle before drawing it, so it reads
+            // as sitting on top of the grid. At 18 pt a solid shape touching a
+            // stroked one turns to mush without the separation.
+            [NSGraphicsContext currentContext].compositingOperation = NSCompositingOperationDestinationOut;
+            NSBezierPath *knock = [warn copy];
+            knock.lineWidth = 2.4;
+            [knock stroke];
+            [knock fill];
+            [NSGraphicsContext currentContext].compositingOperation = NSCompositingOperationSourceOver;
+
+            // Drawn rather than borrowed from a font so it keeps the same optical
+            // weight as the grid it sits against.
+            [NSColor.blackColor set];
+            [warn fill];
+        }
+        return YES;
+    }];
+    img.template = YES;
+    return img;
+}
+
 @implementation RZApp
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
@@ -1910,7 +1982,7 @@ static RZApp *gApp;
           RZStore.shared.active.name, RZStore.shared.trigger);
 
     self.statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
-    self.statusItem.button.title = AXIsProcessTrusted() ? @"▦" : @"▦⚠";
+    [self setMenuBarTrusted:AXIsProcessTrusted()];
     [self rebuildMenu];
 
     // Trigger the system dialog if Accessibility permission is missing
@@ -1925,15 +1997,24 @@ static RZApp *gApp;
             [RZDrag.shared start];
             if (RZDrag.shared.running) {
                 [t invalidate];
-                self.statusItem.button.title = @"▦";
+                [self setMenuBarTrusted:YES];
                 RZLog(@"permission granted, layer active");
                 [self rebuildMenu];
             } else {
-                self.statusItem.button.title = @"▦⚠";
+                [self setMenuBarTrusted:NO];
                 if (++polls % 10 == 0) RZLog(@"still no permission (poll %ld)", (long)polls);
             }
         }];
     }
+}
+
+- (void)setMenuBarTrusted:(BOOL)trusted {
+    self.statusItem.button.image = RZMenuBarImage(trusted);
+    self.statusItem.button.title = @"";
+    // VoiceOver and the Accessibility inspector get the state that the icon shows
+    // graphically; a bare image would otherwise read as an unlabelled button.
+    self.statusItem.button.accessibilityLabel =
+        trusted ? @"RectZones" : @"RectZones — Accessibility permission needed";
 }
 
 - (void)rebuildMenu {
