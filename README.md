@@ -55,8 +55,9 @@ open build/RectZones.app
 ```
 
 When macOS asks, grant Accessibility (System Settings → Privacy & Security →
-Accessibility → RectZones **on**). The menu bar icon flips from **▦⚠** to **▦** when
-you're ready. That's the whole install — no account, no notarization, nothing else.
+Accessibility → RectZones **on**). The menu bar icon carries a small warning triangle
+until permission is granted, and drops it once you're ready. That's the whole install —
+no account, no notarization, nothing else.
 
 **Requirements:** macOS 13+, Xcode Command Line Tools (`xcode-select --install`).
 
@@ -68,7 +69,7 @@ you're ready. That's the whole install — no account, no notarization, nothing 
 1. **Rebuilding breaks the permission — and the switch still looks ON.** The app is
    ad-hoc signed, so every build gets a new identity while the existing Accessibility
    entry keeps authorizing the previous one. The row reads **ON**, the menu bar icon
-   reads **▦⚠**, and the log says `trusted=0`. Toggling the row off and on does NOT fix
+   shows its warning triangle, and the log says `trusted=0`. Toggling the row off and on does NOT fix
    it. Remove and re-add it: System Settings → Privacy & Security → Accessibility →
    select **RectZones** → **−**, then **+** and pick your `build/RectZones.app`
    (⌘⇧G pastes a path). Reopen the app; the log should show `event tap installed`.
