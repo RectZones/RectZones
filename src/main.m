@@ -181,6 +181,7 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
 @property (nonatomic) NSInteger hovered;
 @property (nonatomic, strong) NSIndexSet *selected;
 @property (nonatomic, strong) NSIndexSet *covered; // not selected but covered by the union
+@property (nonatomic) CGFloat gap;                 // the user's placement gap, in points
 @end
 
 @implementation RZZoneView
@@ -188,12 +189,26 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
 - (void)drawRect:(NSRect)dirtyRect {
     NSSize sz = self.bounds.size;
     NSColor *accent = NSColor.controlAccentColor;
+    // The panel is sized to the screen's visibleFrame and this view fills it, so
+    // view points and screen points are the same thing — verified, not assumed —
+    // and the gap needs no conversion. If the panel ever stops matching the
+    // visible frame, this is where it will silently go wrong.
     for (NSUInteger i = 0; i < self.zones.count; i++) {
         NSDictionary *z = self.zones[i];
         double zx = [z[@"x"] doubleValue], zy = [z[@"y"] doubleValue];
         double zw = [z[@"w"] doubleValue], zh = [z[@"h"] doubleValue];
-        NSRect r = NSInsetRect(NSMakeRect(zx * sz.width, (1 - zy - zh) * sz.height,
-                                          zw * sz.width, zh * sz.height), 5, 5);
+        // Draw where the window will actually land: the same padding the
+        // placement applies, not a fixed cosmetic inset. Previously this was a
+        // hardcoded 5 pt regardless of the setting, so at gap 0 the preview
+        // promised separation the placement did not deliver, and at gap 40 the
+        // window came out visibly smaller than the shape that was highlighted.
+        NSRect r = RZPadRect(NSMakeRect(zx * sz.width, (1 - zy - zh) * sz.height,
+                                        zw * sz.width, zh * sz.height), self.gap);
+        // At gap 0 the zones are genuinely adjacent. Nudge them apart by a hair so
+        // neighbouring rounded corners do not overlap into a smudge — this is the
+        // only place the preview is allowed to differ from the placement, it is
+        // sub-pixel at any real size, and it costs nothing in accuracy.
+        if (self.gap <= 0) r = NSInsetRect(r, 1, 1);
         NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:r xRadius:10 yRadius:10];
         BOOL isSel = [self.selected containsIndex:i];
         BOOL isCov = !isSel && [self.covered containsIndex:i];
@@ -222,7 +237,11 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
 
 @implementation RZFootprintView
 - (void)drawRect:(NSRect)dirtyRect {
-    NSBezierPath *p = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 4, 4)
+    // The panel is now the exact rect the window will occupy, so inset only
+    // enough to keep the 3 pt stroke inside the bounds. The old 4 pt inset was
+    // cosmetic and, on top of a panel that ignored the gap entirely, made the
+    // footprint doubly wrong about where the window was going.
+    NSBezierPath *p = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 1.5, 1.5)
                                                       xRadius:10 yRadius:10];
     [[NSColor.controlAccentColor colorWithAlphaComponent:0.28] setFill];
     [p fill];
@@ -325,6 +344,7 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
         [p setFrame:s.visibleFrame display:NO];
         RZZoneView *v = (RZZoneView *)p.contentView;
         v.zones = zones;
+        v.gap = (CGFloat)RZStore.shared.gap;
         v.hovered = (s == hovScreen) ? hovered : -1;
         v.selected = selected[@(i)] ?: [NSIndexSet indexSet];
         v.covered = covered[@(i)] ?: [NSIndexSet indexSet];
@@ -746,7 +766,10 @@ static CGEventRef RZTapCB(CGEventTapProxy proxy, CGEventType type, CGEventRef ev
     if (!self.snapActive) RZLog(@"edge snap: %@", kind);
     self.snapActive = YES;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.snapActive) [RZFootprint.shared showRect:target];
+        // Show the padded rect — the one -placeSnap will actually use. These two
+        // disagreed: the preview drew the bare zone while placement applied the
+        // gap, so the window always landed smaller than the shape shown.
+        if (self.snapActive) [RZFootprint.shared showRect:RZPaddedNS(target)];
     });
 }
 
