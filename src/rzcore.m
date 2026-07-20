@@ -170,6 +170,29 @@ NSString *RZResolveActiveUUID(NSString *wanted, NSArray<RZTemplate *> *templates
     return templates[0].uuid;
 }
 
+NSDictionary *RZMergeConfig(NSDictionary *baseline, NSDictionary *disk, NSDictionary *mine) {
+    if (![mine isKindOfClass:NSDictionary.class]) return @{};
+    if (![disk isKindOfClass:NSDictionary.class]) return mine;
+    if (![baseline isKindOfClass:NSDictionary.class]) baseline = @{};
+
+    NSMutableSet<NSString *> *keys = [NSMutableSet setWithArray:mine.allKeys];
+    [keys addObjectsFromArray:disk.allKeys];
+
+    NSMutableDictionary *out = [NSMutableDictionary dictionaryWithCapacity:keys.count];
+    for (NSString *k in keys) {
+        id base = baseline[k], theirs = disk[k], ours = mine[k];
+        BOOL weChangedIt = !(ours == base || [ours isEqual:base]);
+        if (weChangedIt) {
+            if (ours) out[k] = ours;          // our edit wins over anything on disk
+        } else if (theirs) {
+            out[k] = theirs;                  // untouched by us: keep what is there now
+        } else if (ours) {
+            out[k] = ours;                    // untouched and absent on disk
+        }
+    }
+    return out;
+}
+
 NSDictionary *RZConfigDictionary(NSArray<RZTemplate *> *templates,
                                  NSString *activeUUID,
                                  NSString *trigger,

@@ -105,3 +105,17 @@ NSDictionary *RZConfigDictionary(NSArray<RZTemplate *> *templates,
                                  NSInteger customKey,
                                  NSInteger gap,
                                  NSDictionary *shortcuts);
+
+// Three-way merge, so a second running copy cannot silently undo your settings.
+//
+// config.json lives at a fixed path derived from the string "RectZones" rather
+// than the bundle identifier, so two builds share one file. Writing the whole
+// document from memory means the last writer wins with whatever state it happened
+// to load hours ago — change the gap in one copy, touch anything in the other, and
+// the old value comes back with no warning.
+//
+// baseline is the document as we last read or wrote it, disk is what is there now,
+// mine is what we are about to write. Per key: if we did not touch it, whatever is
+// on disk wins; if we did, ours does. Untouched keys therefore survive another
+// copy's edits, and a key we genuinely changed is not silently reverted.
+NSDictionary *RZMergeConfig(NSDictionary *baseline, NSDictionary *disk, NSDictionary *mine);
