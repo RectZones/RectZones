@@ -29,8 +29,11 @@
   display. Every shortcut row shows a tiny preview of what it covers.
 - **Template editor** — draw zones freely or type columns × rows and hit Apply Grid.
   Name it, save it, switch templates with one click.
+- **Rotated displays get their own template** — a layout drawn for a wide screen is
+  geometrically valid on a portrait monitor and completely useless there. Save a second
+  template as *Portrait only* and each display uses the one that fits its shape.
 - **Adjustable gap** between placed windows (0–40 px), multi-monitor aware,
-  single Objective-C file, zero dependencies.
+  Objective-C with zero dependencies.
 
 ## Screenshots
 

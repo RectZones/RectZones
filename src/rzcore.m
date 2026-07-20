@@ -170,8 +170,19 @@ NSString *RZResolveActiveUUID(NSString *wanted, NSArray<RZTemplate *> *templates
     return templates[0].uuid;
 }
 
+BOOL RZFrameIsPortrait(NSRect frame) {
+    return NSHeight(frame) > NSWidth(frame);
+}
+
+NSString *RZActiveUUIDFromConfig(NSDictionary *cfg, BOOL portrait) {
+    NSString *landscape = RZConfigValue(cfg, @"active", NSString.class);
+    if (!portrait) return landscape;
+    return RZConfigValue(cfg, @"activePortrait", NSString.class) ?: landscape;
+}
+
 NSDictionary *RZConfigDictionary(NSArray<RZTemplate *> *templates,
                                  NSString *activeUUID,
+                                 NSString *activePortraitUUID,
                                  NSString *trigger,
                                  NSInteger customKey,
                                  NSInteger gap,
@@ -181,10 +192,15 @@ NSDictionary *RZConfigDictionary(NSArray<RZTemplate *> *templates,
         if (!t.uuid || !t.name || !t.zones) continue;
         [ts addObject:@{@"uuid": t.uuid, @"name": t.name, @"zones": t.zones}];
     }
-    return @{@"templates": ts,
+    NSMutableDictionary *out = [NSMutableDictionary dictionaryWithDictionary:@{
+             @"templates": ts,
              @"active": activeUUID ?: @"",
              @"trigger": trigger ?: @"cmd",
              @"customKey": @(customKey),
              @"gap": @(gap),
-             @"shortcuts": shortcuts ?: @{}};
+             @"shortcuts": shortcuts ?: @{}}];
+    // Absent rather than mirrored: "no portrait template" is a real state, and an
+    // older build reading this file must not see a key it will not understand.
+    if (activePortraitUUID.length) out[@"activePortrait"] = activePortraitUUID;
+    return out;
 }

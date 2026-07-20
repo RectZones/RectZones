@@ -39,6 +39,10 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
 @interface RZStore : NSObject
 @property (nonatomic, strong) NSMutableArray<RZTemplate *> *templates;
 @property (nonatomic, copy) NSString *activeUUID;
+// Optional second choice, used only on displays taller than they are wide.
+// nil means "same template everywhere", which is what every config written
+// before this existed says, and what the app did.
+@property (nonatomic, copy) NSString *activePortraitUUID;
 @property (nonatomic, copy) NSString *trigger; // cmd | alt | ctrl | fn | custom
 @property (nonatomic) NSInteger customKey;     // key held down while trigger=custom
 @property (nonatomic) NSInteger gap;           // placement gap (px, all four sides)
@@ -46,6 +50,7 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *shortcuts;
 + (instancetype)shared;
 - (RZTemplate *)active;
+- (RZTemplate *)activeForScreen:(NSScreen *)screen;
 - (void)save;
 - (void)upsert:(RZTemplate *)t;
 - (void)removeUUID:(NSString *)uuid;
@@ -75,8 +80,13 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
     NSDictionary *cfg = [parsed isKindOfClass:NSDictionary.class] ? parsed : nil;
 
     self.templates  = RZTemplatesFromConfig(cfg);
-    self.activeUUID = RZResolveActiveUUID([cfg[@"active"] isKindOfClass:NSString.class] ? cfg[@"active"] : nil,
-                                          self.templates);
+    self.activeUUID = RZResolveActiveUUID(RZActiveUUIDFromConfig(cfg, NO), self.templates);
+    // Not resolved against the template list: an unset portrait choice must stay
+    // unset rather than being pinned to templates[0], which would silently turn
+    // "same everywhere" into a second binding nobody asked for.
+    NSString *portrait = RZActiveUUIDFromConfig(cfg, YES);
+    self.activePortraitUUID = [portrait isEqualToString:self.activeUUID] ? nil
+                            : ([self findUUID:portrait] ? portrait : nil);
     self.trigger    = RZTriggerFromConfig(cfg);
     self.customKey  = RZCustomKeyFromConfig(cfg);
     self.gap        = RZGapFromConfig(cfg);
@@ -94,9 +104,19 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
     return [self findUUID:self.activeUUID] ?: self.templates[0];
 }
 
+// The template a given display should use. Everything that places a window goes
+// through here; -active remains the editor's notion of "the one being worked on".
+- (RZTemplate *)activeForScreen:(NSScreen *)screen {
+    if (screen && self.activePortraitUUID && RZFrameIsPortrait(screen.frame)) {
+        RZTemplate *t = [self findUUID:self.activePortraitUUID];
+        if (t) return t;
+    }
+    return [self active];
+}
+
 - (void)save {
-    NSDictionary *cfg = RZConfigDictionary(self.templates, self.activeUUID, self.trigger,
-                                           self.customKey, self.gap, self.shortcuts);
+    NSDictionary *cfg = RZConfigDictionary(self.templates, self.activeUUID, self.activePortraitUUID,
+                                           self.trigger, self.customKey, self.gap, self.shortcuts);
     NSData *data = [NSJSONSerialization dataWithJSONObject:cfg options:NSJSONWritingPrettyPrinted error:nil];
     [data writeToFile:[self path] atomically:YES];
 }
@@ -278,11 +298,10 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
 @interface RZOverlay : NSObject
 @property (nonatomic, strong) NSMutableArray<NSPanel *> *windows;
 + (instancetype)shared;
-- (void)showZones:(NSArray *)zones
-    hoveredScreen:(NSScreen *)hovScreen
-          hovered:(NSInteger)hovered
-         selected:(NSDictionary<NSNumber *, NSIndexSet *> *)selected
-          covered:(NSDictionary<NSNumber *, NSIndexSet *> *)covered;
+- (void)showZonesHoveredScreen:(NSScreen *)hovScreen
+                       hovered:(NSInteger)hovered
+                      selected:(NSDictionary<NSNumber *, NSIndexSet *> *)selected
+                       covered:(NSDictionary<NSNumber *, NSIndexSet *> *)covered;
 - (void)hide;
 @end
 
@@ -295,9 +314,10 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
     return s;
 }
 
-- (void)showZones:(NSArray *)zones hoveredScreen:(NSScreen *)hovScreen
-          hovered:(NSInteger)hovered selected:(NSDictionary<NSNumber *, NSIndexSet *> *)selected
-          covered:(NSDictionary<NSNumber *, NSIndexSet *> *)covered {
+- (void)showZonesHoveredScreen:(NSScreen *)hovScreen
+                       hovered:(NSInteger)hovered
+                      selected:(NSDictionary<NSNumber *, NSIndexSet *> *)selected
+                       covered:(NSDictionary<NSNumber *, NSIndexSet *> *)covered {
     NSArray<NSScreen *> *screens = NSScreen.screens;
     if (self.windows.count != screens.count) {
         for (NSPanel *w in self.windows) [w orderOut:nil];
@@ -324,7 +344,10 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
         NSPanel *p = self.windows[i];
         [p setFrame:s.visibleFrame display:NO];
         RZZoneView *v = (RZZoneView *)p.contentView;
-        v.zones = zones;
+        // Each panel draws its own screen's template: with a portrait template
+        // assigned, a landscape and a rotated display show different grids at the
+        // same moment, and the overlay must agree with where the drop will land.
+        v.zones = [RZStore.shared activeForScreen:s].zones;
         v.hovered = (s == hovScreen) ? hovered : -1;
         v.selected = selected[@(i)] ?: [NSIndexSet indexSet];
         v.covered = covered[@(i)] ?: [NSIndexSet indexSet];
@@ -619,7 +642,7 @@ static CGEventRef RZTapCB(CGEventTapProxy proxy, CGEventType type, CGEventRef ev
 
     NSScreen *screen = RZScreenAtCG(p);
     NSInteger idx = -1;
-    NSArray *zones = RZStore.shared.active.zones;
+    NSArray *zones = [RZStore.shared activeForScreen:screen].zones;
     if (screen) idx = RZZoneIndexAtCG(p, screen, zones);
     self.hovScreen = screen;
     self.hovIndex = idx;
@@ -656,13 +679,16 @@ static CGEventRef RZTapCB(CGEventTapProxy proxy, CGEventType type, CGEventRef ev
         NSArray<NSScreen *> *screens = NSScreen.screens;
         NSRect uni = NSZeroRect;
         BOOL has = NO;
+        // Zones are resolved per screen: a selection can span displays, and with a
+        // portrait template assigned those displays no longer share a grid.
         for (NSNumber *sid in sel) {
             NSUInteger si = sid.unsignedIntegerValue;
             if (si >= screens.count) continue;
+            NSArray *sz = [RZStore.shared activeForScreen:screens[si]].zones;
             NSIndexSet *set = sel[sid];
             for (NSUInteger i = set.firstIndex; i != NSNotFound; i = [set indexGreaterThanIndex:i]) {
-                if (i >= zones.count) continue;
-                NSRect r = RZZoneNSRect(zones[i], screens[si]);
+                if (i >= sz.count) continue;
+                NSRect r = RZZoneNSRect(sz[i], screens[si]);
                 uni = has ? NSUnionRect(uni, r) : r;
                 has = YES;
             }
@@ -670,15 +696,16 @@ static CGEventRef RZTapCB(CGEventTapProxy proxy, CGEventType type, CGEventRef ev
         if (has) {
             NSRect probe = NSInsetRect(uni, 3, 3);
             for (NSUInteger si = 0; si < screens.count; si++) {
+                NSArray *sz = [RZStore.shared activeForScreen:screens[si]].zones;
                 NSMutableIndexSet *cov = [NSMutableIndexSet indexSet];
-                for (NSUInteger i = 0; i < zones.count; i++) {
-                    NSRect inter = NSIntersectionRect(RZZoneNSRect(zones[i], screens[si]), probe);
+                for (NSUInteger i = 0; i < sz.count; i++) {
+                    NSRect inter = NSIntersectionRect(RZZoneNSRect(sz[i], screens[si]), probe);
                     if (inter.size.width > 4 && inter.size.height > 4) [cov addIndex:i];
                 }
                 if (cov.count) covered[@(si)] = cov;
             }
         }
-        [RZOverlay.shared showZones:zones hoveredScreen:hs hovered:hi selected:sel covered:covered];
+        [RZOverlay.shared showZonesHoveredScreen:hs hovered:hi selected:sel covered:covered];
     });
 }
 
@@ -790,24 +817,27 @@ static CGEventRef RZTapCB(CGEventTapProxy proxy, CGEventType type, CGEventRef ev
     dispatch_async(dispatch_get_main_queue(), ^{
         [RZOverlay.shared hide];
         if (place && win) {
-            NSArray *zones = RZStore.shared.active.zones;
             NSArray<NSScreen *> *screens = NSScreen.screens;
             NSRect uni = NSZeroRect;
             BOOL has = NO;
             for (NSNumber *sid in sel) {
                 NSUInteger si = sid.unsignedIntegerValue;
                 if (si >= screens.count) continue;
+                NSArray *sz = [RZStore.shared activeForScreen:screens[si]].zones;
                 NSIndexSet *set = sel[sid];
                 for (NSUInteger i = set.firstIndex; i != NSNotFound; i = [set indexGreaterThanIndex:i]) {
-                    if (i >= zones.count) continue;
-                    NSRect r = RZZoneNSRect(zones[i], screens[si]);
+                    if (i >= sz.count) continue;
+                    NSRect r = RZZoneNSRect(sz[i], screens[si]);
                     uni = has ? NSUnionRect(uni, r) : r;
                     has = YES;
                 }
             }
-            if (!has && hs && hi >= 0 && hi < (NSInteger)zones.count) {
-                uni = RZZoneNSRect(zones[hi], hs);
-                has = YES;
+            if (!has && hs) {
+                NSArray *hz = [RZStore.shared activeForScreen:hs].zones;
+                if (hi >= 0 && hi < (NSInteger)hz.count) {
+                    uni = RZZoneNSRect(hz[hi], hs);
+                    has = YES;
+                }
             }
             RZLog(@"dropped: place=%d selection=%@ target=%@", has,
                   sel.count ? sel : @"(hover)", has ? NSStringFromRect(uni) : @"-");
@@ -1018,8 +1048,8 @@ static OSStatus RZHotKeyHandler(EventHandlerCallRef next, EventRef event, void *
         RZSetWindowFrame(win, RZCGFromNS(NSInsetRect(vf, vf.size.width * 0.05, vf.size.height * 0.05)));
         [self resetCycle];
     } else if ([actionID isEqualToString:@"cycleNext"] || [actionID isEqualToString:@"cyclePrev"]) {
-        [self cycleWindow:win zones:RZStore.shared.active.zones scope:@"template"
-                  forward:[actionID isEqualToString:@"cycleNext"]];
+        [self cycleWindow:win zones:[RZStore.shared activeForScreen:[self screenOf:win]].zones
+                    scope:@"template" forward:[actionID isEqualToString:@"cycleNext"]];
     } else if ([actionID isEqualToString:@"twoThirds"]) {
         // ⅔ width, full height: cycles between left ⅔ and right ⅔
         NSArray *cells = @[RZZone(0, 0, 2.0 / 3, 1), RZZone(1.0 / 3, 0, 2.0 / 3, 1)];
@@ -1059,7 +1089,7 @@ static OSStatus RZHotKeyHandler(EventHandlerCallRef next, EventRef event, void *
         }
     } else if ([actionID hasPrefix:@"zone"]) {
         NSInteger idx = [[actionID substringFromIndex:4] integerValue] - 1;
-        NSArray *zones = RZStore.shared.active.zones;
+        NSArray *zones = [RZStore.shared activeForScreen:[self screenOf:win]].zones;
         if (idx >= 0 && idx < (NSInteger)zones.count) {
             NSScreen *screen = [self screenOf:win];
             RZSetWindowFrame(win, RZCGFromNS(RZPaddedNS(RZZoneNSRect(zones[idx], screen))));
@@ -1237,6 +1267,7 @@ static RZApp *gApp;
 @property (nonatomic, strong) NSTextField *colsField;
 @property (nonatomic, strong) NSTextField *rowsField;
 @property (nonatomic, strong) NSTextField *gapField;
+@property (nonatomic, strong) NSPopUpButton *usePopup;
 @property (nonatomic, strong) NSButton *saveButton;
 @property (nonatomic, strong) RZTemplate *editing;
 + (instancetype)shared;
@@ -1361,7 +1392,16 @@ static RZApp *gApp;
     saveBtn.frame = sf;
     [c addSubview:saveBtn];
     self.saveButton = saveBtn;
-    bx2 += sf.size.width + 14;
+    bx2 += sf.size.width + 6;
+
+    // Which displays this template applies to. Orientation rather than identity:
+    // a rotated monitor keeps its shape across unplugging, a different port, or a
+    // resolution change, so nothing has to be remembered about the display itself.
+    self.usePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(bx2, by, 132, 26) pullsDown:NO];
+    [self.usePopup addItemsWithTitles:@[@"All displays", @"Landscape only", @"Portrait only"]];
+    self.usePopup.toolTip = @"Which displays this template is used on when a window is dropped.";
+    [c addSubview:self.usePopup];
+    bx2 += 138;
 
     NSTextField *gapLabel = [NSTextField labelWithString:@"Gap"];
     gapLabel.frame = NSMakeRect(bx2, by + 5, 46, 18);
@@ -1412,6 +1452,17 @@ static RZApp *gApp;
     self.canvas.needsDisplay = YES;
     self.gapField.integerValue = RZStore.shared.gap;
     [self clearDirty];
+    [self syncUsePopup];
+}
+
+- (void)syncUsePopup {
+    NSString *uuid = self.editing.uuid;
+    BOOL isLandscape = [RZStore.shared.activeUUID isEqualToString:uuid];
+    BOOL isPortrait  = [RZStore.shared.activePortraitUUID isEqualToString:uuid];
+    NSInteger idx = 0;
+    if (isPortrait && !isLandscape)      idx = 2;
+    else if (isLandscape && RZStore.shared.activePortraitUUID) idx = 1;
+    [self.usePopup selectItemAtIndex:idx];
 }
 
 - (void)markDirty {
@@ -1511,7 +1562,18 @@ static RZApp *gApp;
     self.editing.name = self.nameField.stringValue.length ? self.nameField.stringValue : @"Untitled";
     self.editing.zones = RZCopyZones(self.canvas.zones);
     [RZStore.shared upsert:self.editing];
-    RZStore.shared.activeUUID = self.editing.uuid;
+    switch (self.usePopup.indexOfSelectedItem) {
+        case 1: // landscape only — leave any portrait choice alone
+            RZStore.shared.activeUUID = self.editing.uuid;
+            break;
+        case 2: // portrait only
+            RZStore.shared.activePortraitUUID = self.editing.uuid;
+            break;
+        default: // all displays: one template everywhere, which clears the split
+            RZStore.shared.activeUUID = self.editing.uuid;
+            RZStore.shared.activePortraitUUID = nil;
+            break;
+    }
     [RZStore.shared save];
     [RZHotkeys.shared resetCycle];
     [self reloadPopup];

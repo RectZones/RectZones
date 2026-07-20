@@ -98,9 +98,31 @@ NSMutableDictionary *RZShortcutsFromConfig(NSDictionary *cfg);
 // Picks wanted if it names a live template, else the first one.
 NSString *RZResolveActiveUUID(NSString *wanted, NSArray<RZTemplate *> *templates);
 
-// Encoding, ready for NSJSONSerialization.
+#pragma mark - Orientation
+
+// A display is portrait when it is taller than it is wide. Square counts as
+// landscape: it is the status quo, and there is nothing to gain from treating an
+// exactly-square display as the special case.
+//
+// Zones are ratios, so a landscape template is not *wrong* on a rotated display —
+// it is just useless. Three columns on a 1080x1920 panel are 360 pt wide and
+// 1920 tall, which is geometrically faithful and holds no real window.
+BOOL RZFrameIsPortrait(NSRect frame);
+
+// The template chosen for a display of this orientation.
+//
+// Portrait falls back to the landscape choice when no portrait template has been
+// picked, so a config written before this existed behaves exactly as it did — one
+// template for every screen — until someone deliberately assigns a second one.
+NSString *RZActiveUUIDFromConfig(NSDictionary *cfg, BOOL portrait);
+
+// Encoding, ready for NSJSONSerialization. activePortraitUUID may be nil, which
+// is how "no separate portrait template" is represented — the key is then absent
+// rather than duplicating the landscape choice, so the file stays readable by an
+// older build.
 NSDictionary *RZConfigDictionary(NSArray<RZTemplate *> *templates,
                                  NSString *activeUUID,
+                                 NSString *activePortraitUUID,
                                  NSString *trigger,
                                  NSInteger customKey,
                                  NSInteger gap,
