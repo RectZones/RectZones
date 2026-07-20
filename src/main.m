@@ -44,6 +44,9 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
 @property (nonatomic) NSInteger gap;           // placement gap (px, all four sides)
 // action id → {key: keyCode, mods: NSEventModifierFlags}
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *shortcuts;
+// The document as we last read or wrote it. Saving merges against this so a
+// second running copy holding hours-old state cannot revert a setting we changed.
+@property (nonatomic, copy) NSDictionary *baseline;
 + (instancetype)shared;
 - (RZTemplate *)active;
 - (void)save;
@@ -81,7 +84,15 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
     self.customKey  = RZCustomKeyFromConfig(cfg);
     self.gap        = RZGapFromConfig(cfg);
     self.shortcuts  = RZShortcutsFromConfig(cfg);
+    self.baseline   = cfg;
     [self save];
+}
+
+// What is currently on disk, whoever wrote it.
+- (NSDictionary *)readDisk {
+    NSData *data = [NSData dataWithContentsOfFile:[self path]];
+    id parsed = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    return [parsed isKindOfClass:NSDictionary.class] ? parsed : nil;
 }
 
 - (RZTemplate *)findUUID:(NSString *)uuid {
@@ -95,8 +106,12 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
 }
 
 - (void)save {
-    NSDictionary *cfg = RZConfigDictionary(self.templates, self.activeUUID, self.trigger,
-                                           self.customKey, self.gap, self.shortcuts);
+    NSDictionary *mine = RZConfigDictionary(self.templates, self.activeUUID, self.trigger,
+                                            self.customKey, self.gap, self.shortcuts);
+    // Merge against what is on disk now rather than overwriting it. Another copy
+    // of the app may have changed something we never touched.
+    NSDictionary *cfg = RZMergeConfig(self.baseline, [self readDisk], mine);
+    self.baseline = cfg;
     NSData *data = [NSJSONSerialization dataWithJSONObject:cfg options:NSJSONWritingPrettyPrinted error:nil];
     [data writeToFile:[self path] atomically:YES];
 }
@@ -1237,6 +1252,7 @@ static RZApp *gApp;
 @property (nonatomic, strong) NSTextField *colsField;
 @property (nonatomic, strong) NSTextField *rowsField;
 @property (nonatomic, strong) NSTextField *gapField;
+@property (nonatomic, strong) NSStepper *gapStepper;
 @property (nonatomic, strong) NSButton *saveButton;
 @property (nonatomic, strong) RZTemplate *editing;
 + (instancetype)shared;
@@ -1371,10 +1387,23 @@ static RZApp *gApp;
     self.gapField.target = self;
     self.gapField.action = @selector(gapChanged);
     [c addSubview:self.gapField];
-    bx2 += 40;
+    bx2 += 38;
+    // A stepper alongside the field. Typing requires Return or a focus change to
+    // commit; clicking a stepper arrow commits immediately, so the setting can be
+    // changed without knowing that rule.
+    self.gapStepper = [[NSStepper alloc] initWithFrame:NSMakeRect(bx2, by, 15, 26)];
+    self.gapStepper.minValue = 0;
+    self.gapStepper.maxValue = 40;
+    self.gapStepper.increment = 1;
+    self.gapStepper.valueWraps = NO;
+    self.gapStepper.target = self;
+    self.gapStepper.action = @selector(gapStepped);
+    [c addSubview:self.gapStepper];
+    bx2 += 19;
     NSTextField *pxLabel = [NSTextField labelWithString:@"px"];
     pxLabel.frame = NSMakeRect(bx2, by + 5, 22, 18);
     [c addSubview:pxLabel];
+    [self syncGapField];
 
     __weak typeof(self) ws = self;
     self.canvas.onChange = ^{ [ws markDirty]; };
@@ -1410,8 +1439,16 @@ static RZApp *gApp;
     self.canvas.zones = RZCopyZones(self.editing.zones);
     self.canvas.selectedZone = self.canvas.zones.count ? 0 : -1;
     self.canvas.needsDisplay = YES;
-    self.gapField.integerValue = RZStore.shared.gap;
     [self clearDirty];
+    // The gap is a global setting, not part of a template, so it is deliberately
+    // not refreshed here. Doing so overwrote a value the user had typed but not
+    // yet committed every time they switched, added or deleted a template.
+    // -syncGapField handles the one case that needs it: opening the window.
+}
+
+- (void)syncGapField {
+    self.gapField.integerValue = RZStore.shared.gap;
+    self.gapStepper.integerValue = RZStore.shared.gap;
 }
 
 - (void)markDirty {
@@ -1423,8 +1460,18 @@ static RZApp *gApp;
 }
 
 - (void)gapChanged {
-    RZStore.shared.gap = MAX(0, MIN(40, self.gapField.integerValue));
-    self.gapField.integerValue = RZStore.shared.gap;
+    [self commitGap:self.gapField.integerValue];
+}
+
+- (void)gapStepped {
+    [self commitGap:self.gapStepper.integerValue];
+}
+
+- (void)commitGap:(NSInteger)value {
+    NSInteger clamped = MAX(0, MIN(40, value));
+    if (clamped == RZStore.shared.gap) { [self syncGapField]; return; }
+    RZStore.shared.gap = clamped;
+    [self syncGapField];  // reflect the clamp back into both controls
     [RZStore.shared save];
 }
 
@@ -1885,6 +1932,11 @@ static RZApp *gApp;
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
+    // Commit any field still being edited. A text field only fires its action on
+    // Return or when it stops editing, so closing the window with a typed-but-not
+    // -entered value used to discard it silently — the user watched the number
+    // they wanted sitting in the box as the window went away.
+    [self.window makeFirstResponder:nil];
     [RZShortcutsUI.shared cancelRecording];
     if (self.keyMonitor) { [NSEvent removeMonitor:self.keyMonitor]; self.keyMonitor = nil; }
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];

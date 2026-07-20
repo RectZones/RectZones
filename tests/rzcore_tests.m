@@ -284,6 +284,50 @@ static void test_config(void) {
     ok([RZResolveActiveUUID(nil, ts) isEqualToString:ts[0].uuid], "no uuid falls back to the first");
     ok(RZResolveActiveUUID(@"anything", @[]) == nil, "no templates yields nil rather than a crash");
 
+    group("config merge");
+    // The scenario this exists for: two copies of the app share one config file.
+    // Copy A sets the gap to 0 and saves. Copy B has been running since before
+    // that, so its in-memory gap is still 8 — and 8 is also what it last read, so
+    // it did not change it. When B saves, the untouched key must take the value
+    // on disk rather than reverting A's edit.
+    NSDictionary *baseB = @{@"gap": @8, @"trigger": @"cmd"};
+    NSDictionary *diskNow = @{@"gap": @0, @"trigger": @"cmd"};
+    NSDictionary *mineB = @{@"gap": @8, @"trigger": @"cmd"};
+    NSDictionary *merged = RZMergeConfig(baseB, diskNow, mineB);
+    eqi([merged[@"gap"] integerValue], 0, "a key we did not touch keeps the value another copy wrote");
+
+    // But a key we genuinely changed must survive, even if disk disagrees.
+    NSDictionary *mineChanged = @{@"gap": @24, @"trigger": @"cmd"};
+    merged = RZMergeConfig(baseB, diskNow, mineChanged);
+    eqi([merged[@"gap"] integerValue], 24, "our own edit wins over what is on disk");
+
+    // Changing one key must not drag stale values for the others along with it.
+    NSDictionary *diskTrigger = @{@"gap": @8, @"trigger": @"fn"};
+    merged = RZMergeConfig(baseB, diskTrigger, mineChanged);
+    eqi([merged[@"gap"] integerValue], 24, "our changed key survives");
+    ok([merged[@"trigger"] isEqualToString:@"fn"], "their changed key survives alongside it");
+
+    // A key only one side knows about is not dropped.
+    merged = RZMergeConfig(@{}, @{@"newKey": @1}, @{@"gap": @8});
+    eqi([merged[@"newKey"] integerValue], 1, "an unknown key on disk is preserved");
+    eqi([merged[@"gap"] integerValue], 8, "our key is preserved alongside it");
+
+    // Deletion: we removed a key we previously had, disk still has the old value.
+    merged = RZMergeConfig(@{@"gap": @8}, @{@"gap": @8}, @{});
+    ok(merged[@"gap"] == nil, "a key we deliberately dropped is not resurrected");
+
+    // Degenerate inputs — a missing or unreadable file must not lose our settings.
+    merged = RZMergeConfig(nil, nil, @{@"gap": @5});
+    eqi([merged[@"gap"] integerValue], 5, "no baseline and no disk yields our own config");
+    merged = RZMergeConfig(@{@"gap": @8}, (NSDictionary *)[NSNull null], @{@"gap": @5});
+    eqi([merged[@"gap"] integerValue], 5, "a garbage disk config does not lose our edit");
+    ok(RZMergeConfig(nil, @{@"gap": @1}, nil).count == 0, "nothing of ours yields nothing");
+
+    // Merging must be stable: feeding the result back changes nothing.
+    NSDictionary *once = RZMergeConfig(baseB, diskNow, mineB);
+    NSDictionary *twice = RZMergeConfig(once, once, once);
+    ok([once isEqualToDictionary:twice], "merging is idempotent");
+
     group("zone model");
     NSArray *orig = @[RZZone(0, 0, .5, 1)];
     NSMutableArray *copy = RZCopyZones(orig);
