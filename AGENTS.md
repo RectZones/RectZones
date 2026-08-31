@@ -74,6 +74,15 @@ open build/RectZones.app
    title-strip allowance; the maximize band stays tight, since it lacks the side-edge
    requirement that keeps corners from misfiring.
 
+6. **A value typed into an editor text field is not in the store yet.** These fields
+   push into `RZStore` from their target/action, which fires only when the field editor
+   ends editing — and the natural ways out of a field do not end it: ⏎ is claimed by the
+   default "Save & Use" button (key equivalents are dispatched before the field editor
+   sees the key) and clicking a button moves no first responder. That is why the Gap
+   field silently did nothing. Any new field needs the same treatment as `commitGap`:
+   an explicit `makeFirstResponder:nil` on every path that leaves it (save, window
+   close, window resigning key, canvas click).
+
 ## Roadmap / open items
 
 - Launch at login (`SMAppService`).

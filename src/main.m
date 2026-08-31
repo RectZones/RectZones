@@ -1136,6 +1136,9 @@ static OSStatus RZHotKeyHandler(EventHandlerCallRef next, EventRef event, void *
 }
 
 - (void)mouseDown:(NSEvent *)event {
+    // Taking focus ends editing in whatever text field had it, so a typed value
+    // (the gap in particular) is committed instead of being dropped on the floor.
+    [self.window makeFirstResponder:self];
     NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
     self.dragStart = p;
     CGFloat margin = 8;
@@ -1241,6 +1244,7 @@ static RZApp *gApp;
 @property (nonatomic, strong) RZTemplate *editing;
 + (instancetype)shared;
 - (NSView *)viewRefreshed;
+- (void)commitGap;
 @end
 
 @interface RZApp : NSObject <NSApplicationDelegate>
@@ -1423,9 +1427,23 @@ static RZApp *gApp;
 }
 
 - (void)gapChanged {
-    RZStore.shared.gap = MAX(0, MIN(40, self.gapField.integerValue));
-    self.gapField.integerValue = RZStore.shared.gap;
+    NSInteger g = MAX(0, MIN(40, self.gapField.integerValue));
+    self.gapField.integerValue = g; // echo the clamp back to the user
+    if (g == RZStore.shared.gap) return; // committing an unchanged field writes nothing
+    RZStore.shared.gap = g;
     [RZStore.shared save];
+    RZLog(@"gap set to %ld px", (long)g);
+}
+
+// The gap reaches the store only when the field's action fires, i.e. when the
+// field editor gives up editing — and the obvious ways out of the field do not
+// end it: \r belongs to the default "Save & Use" button (key equivalents are
+// dispatched before the field editor sees the key) and clicking a button moves
+// no focus. So every path that leaves the field commits it by hand.
+- (void)commitGap {
+    if (!self.gapField) return;
+    [self.view.window makeFirstResponder:nil]; // ends editing; may fire gapChanged
+    [self gapChanged];                         // idempotent: clamped, then read back
 }
 
 - (void)templatePicked {
@@ -1507,6 +1525,7 @@ static RZApp *gApp;
 }
 
 - (void)saveTemplate {
+    [self commitGap]; // this button owns \r, so it is where a typed gap arrives
     if (!self.canvas.zones.count) return;
     self.editing.name = self.nameField.stringValue.length ? self.nameField.stringValue : @"Untitled";
     self.editing.zones = RZCopyZones(self.canvas.zones);
@@ -1884,7 +1903,12 @@ static RZApp *gApp;
     [self refreshTriggerRadios];
 }
 
+- (void)windowDidResignKey:(NSNotification *)notification {
+    [RZEditor.shared commitGap];
+}
+
 - (void)windowWillClose:(NSNotification *)notification {
+    [RZEditor.shared commitGap];
     [RZShortcutsUI.shared cancelRecording];
     if (self.keyMonitor) { [NSEvent removeMonitor:self.keyMonitor]; self.keyMonitor = nil; }
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
