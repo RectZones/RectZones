@@ -6,22 +6,21 @@
 #import <ApplicationServices/ApplicationServices.h>
 #import <Carbon/Carbon.h>
 
-// Zone geometry, placement math and config encoding. Kept free of AppKit and the
-// filesystem so the test target can link it on its own — see src/rzcore.h.
+// Zone geometry, placement math, config encoding, and the log timestamp format.
+// Kept free of AppKit and the filesystem so the test target can link it on its
+// own — see src/rzcore.h.
 #import "rzcore.h"
 
 // Diagnostic log: /tmp/rectzones.log — see what actually happened when debugging.
+// The timestamp format lives in rzcore.m so the test suite can pin it.
 static void RZLog(NSString *fmt, ...) {
-    static NSDateFormatter *df;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ df = [NSDateFormatter new]; df.dateFormat = @"HH:mm:ss.SSS"; });
     va_list ap;
     va_start(ap, fmt);
     NSString *s = [[NSString alloc] initWithFormat:fmt arguments:ap];
     va_end(ap);
     FILE *f = fopen("/tmp/rectzones.log", "a");
     if (f) {
-        fprintf(f, "%s %s\n", [df stringFromDate:NSDate.date].UTF8String, s.UTF8String);
+        fprintf(f, "%s %s\n", RZLogTimestamp(NSDate.date).UTF8String, s.UTF8String);
         fclose(f);
     }
 }
