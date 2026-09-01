@@ -209,3 +209,16 @@ NSString *RZLogTimestamp(NSDate *date) {
     });
     return [df stringFromDate:date];
 }
+
+#pragma mark - Accessibility Zoom
+
+NSPoint RZZoomMapPoint(NSPoint glass, NSRect display, NSPoint centre, double factor) {
+    if (!(factor > 1.0001) || NSWidth(display) <= 0 || NSHeight(display) <= 0) return glass;
+    // The display's own centre is the fixed point of the magnification, so the offset
+    // from it shrinks by the factor and lands relative to the zoom window's centre.
+    NSPoint p = NSMakePoint(centre.x + (glass.x - NSMidX(display)) / factor,
+                            centre.y + (glass.y - NSMidY(display)) / factor);
+    p.x = fmin(fmax(p.x, NSMinX(display)), NSMaxX(display));
+    p.y = fmin(fmax(p.y, NSMinY(display)), NSMaxY(display));
+    return p;
+}

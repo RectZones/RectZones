@@ -17,7 +17,7 @@ single-file Objective-C app**: clang + Cocoa, zero external dependencies. Rectan
 |---|---|
 | `RZLog` | Diagnostic log → `/tmp/rectzones.log`. Read this FIRST on any bug report. |
 | Model (`RZTemplate`, `RZStore`) | Templates + active template + trigger + shortcuts + gap; JSON persistence at `~/Library/Application Support/RectZones/config.json`. |
-| Coordinates | CRITICAL: CG/AX coordinates are top-left origin (y down), AppKit is bottom-left (y up). Zones are ratios (0–1) of a screen's `visibleFrame`, top-left origin. All conversions live here — if windows land in the wrong place, look here first. |
+| Coordinates | CRITICAL: CG/AX coordinates are top-left origin (y down), AppKit is bottom-left (y up). Zones are ratios (0–1) of a screen's `visibleFrame`, top-left origin. All conversions live here — if windows land in the wrong place, look here first. With Accessibility Zoom on, the tap's pointer position is first mapped through the zoom geometry (`RZPointerPoint`, gotcha 6). |
 | Overlay (`RZZoneView`, `RZFootprint`, `RZOverlay`) | Per-screen click-through borderless panels; zone highlighting (hover/selected/covered) and the single-rect footprint for edge snapping. |
 | AX helpers (`RZWindowAt`…) | Window under cursor, read/write frames. Position is written again after resize (some apps shift it). |
 | `RZDrag` | `CGEventTap` (listen-only) state machine. Modifier state is read from **every** event — `flagsChanged` alone misses remapped keys. Window-moving check runs continuously with no threshold (Rectangle's approach) plus a title-strip heuristic. Every swept zone accumulates while the trigger is held — no second modifier; drop applies the union, releasing the trigger cancels. Accumulation is bounded by the keypress, not the drag, so the path taken before pressing does not pollute the pick; selection is scoped to one screen. Edge/corner snapping (`updateSnapWithMouse`) shows `RZFootprint` after a 0.12 s dwell when dragging without the trigger; the top band is offset by the menu bar height and top corners get a title-strip allowance (see gotcha 5). |
@@ -83,6 +83,20 @@ open build/RectZones.app
    at the top must measure from `visibleFrame`, not `frame`. Corners get the full
    title-strip allowance; the maximize band stays tight, since it lacks the side-edge
    requirement that keeps corners from misfiring.
+6. **Accessibility Zoom moves the pointer out from under the tap.** The event tap reports
+   the pointer's position on the physical display; with Zoom on (⌃-scroll or the
+   three-finger double tap) the display shows a magnified window of the screen, so the
+   point the user sees under the pointer is somewhere else and every zone was picked as if
+   zoom were off — on an 8×6 grid the pick slid by whole cells. No public API gives the
+   geometry. `RZZoomParameters` resolves the private SkyLight call
+   (`CGSGetZoomParameters`: window centre + factor, CG coordinates) at runtime and
+   `RZZoomMapPoint` (rzcore.m, under test) does the arithmetic; if the symbol ever
+   disappears the mapping switches itself off and the log says so on first use. Measured
+   before trusting it: with the pointer on the top edge the reported centre sits exactly
+   `height / (2 × factor)` below the top, at three different factors, so the centre is the
+   middle of the magnified window and it is clamped to the display. Every session logs
+   `zoom: factor=… centre=… pointer=…` while zoomed; compare the pointer with the
+   `hover:` zone that follows when a zoom report comes in.
 
 ## Landing a change
 
