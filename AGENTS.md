@@ -187,7 +187,10 @@ outside a deliberate, announced migration.
 
 - Launch at login (`SMAppService`).
 - Rectangle parity extras: previous display, center, restore.
-- Per-screen templates (currently one template applies to all screens).
+- Per-screen templates. Per-orientation is done (one template for landscape screens, an
+  optional second one for portrait, chosen by the screen's shape at placement time);
+  binding a template to a specific display is still open and needs a display identity
+  that survives unplugging and port changes.
 - ~~Test coverage.~~ **Done.** The pure logic — zone geometry, placement math, config
   read/write — now lives in `src/rzcore.m`, which `build.sh` compiles alongside
   `src/main.m`; the test runner is a separate `clang` target (`test.sh`) that links only
