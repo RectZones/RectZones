@@ -1,10 +1,11 @@
 // RectZones core: the parts of the app that are just arithmetic and data.
 //
-// Zone geometry, placement math, and config encoding live here. Nothing in this
-// file may touch the screen, the window server, the filesystem, the user's
-// settings, or AppKit — every input arrives as an argument. That restriction is
-// the whole point: it is what lets a test target link this file and exercise the
-// math with no display, no running app, and no Accessibility grant.
+// Zone geometry, placement math, config encoding, and the diagnostic log's
+// timestamp formatting live here. Nothing in this file may touch the screen, the
+// window server, the filesystem, the user's settings, or AppKit — every input
+// arrives as an argument. That restriction is the whole point: it is what lets a
+// test target link this file and exercise the math with no display, no running
+// app, and no Accessibility grant.
 //
 // If a function here starts needing NSScreen, RZStore, or a file path, it has
 // stopped being core logic and belongs back in main.m, with the system state
@@ -105,3 +106,10 @@ NSDictionary *RZConfigDictionary(NSArray<RZTemplate *> *templates,
                                  NSInteger customKey,
                                  NSInteger gap,
                                  NSDictionary *shortcuts);
+
+#pragma mark - Diagnostics
+
+// The prefix on every diagnostic log line: ISO 8601, local time, milliseconds and a
+// numeric UTC offset — 2026-08-31T17:42:03.481+02:00. Always 29 characters. The date
+// arrives as an argument so the format can be pinned by a test.
+NSString *RZLogTimestamp(NSDate *date);

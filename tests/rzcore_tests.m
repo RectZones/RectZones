@@ -37,6 +37,15 @@ static void eqi(NSInteger got, NSInteger want, const char *what) {
     }
 }
 
+static void eqs(NSString *got, NSString *want, const char *what) {
+    gChecks++;
+    if (![got isEqualToString:want]) {
+        gFails++;
+        fprintf(stderr, "FAIL  [%s] %s: got %s want %s\n",
+                gGroup, what, got.UTF8String, want.UTF8String);
+    }
+}
+
 static void eqrect(NSRect got, NSRect want, const char *what) {
     gChecks++;
     if (fabs(got.origin.x - want.origin.x) > 1e-9 || fabs(got.origin.y - want.origin.y) > 1e-9 ||
@@ -297,6 +306,54 @@ static void test_config(void) {
     eqi((NSInteger)RZPresetTemplates().count, 5, "five presets ship");
 }
 
+#pragma mark - Log timestamp
+
+static void test_log_timestamp(void) {
+    group("log timestamp");
+
+    // A fixed instant, quantised to the millisecond so a round-trip through the
+    // formatter (SSS precision) has nothing to lose.
+    NSDate *d1 = [NSDate dateWithTimeIntervalSince1970:1798651323.481];
+    NSString *s1 = RZLogTimestamp(d1);
+
+    // Shape: this is what catches a "ZZZZZ" regression, where a zero UTC offset
+    // collapses to "Z" and the stamp stops being a constant width on a UTC runner.
+    eqi((NSInteger)s1.length, 29, "timestamp is always 29 characters");
+    ok(s1.length == 29 && [s1 characterAtIndex:4]  == '-', "dash after year");
+    ok(s1.length == 29 && [s1 characterAtIndex:7]  == '-', "dash after month");
+    ok(s1.length == 29 && [s1 characterAtIndex:10] == 'T', "T separates date and time");
+    ok(s1.length == 29 && [s1 characterAtIndex:13] == ':', "colon after hour");
+    ok(s1.length == 29 && [s1 characterAtIndex:16] == ':', "colon after minute");
+    ok(s1.length == 29 && [s1 characterAtIndex:19] == '.', "dot before milliseconds");
+    unichar sign = s1.length == 29 ? [s1 characterAtIndex:23] : 0;
+    ok(sign == '+' || sign == '-', "offset sign at index 23, never a bare Z");
+    ok(s1.length == 29 && [s1 characterAtIndex:26] == ':', "colon inside the offset");
+
+    // Round-trip: parse the stamp back with an independently built formatter using
+    // the same pattern, and confirm it names the same instant to the millisecond.
+    // This is what proves the value is correct rather than merely well-shaped, on
+    // any machine's timezone (including a UTC CI runner).
+    NSDateFormatter *parser = [NSDateFormatter new];
+    parser.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    parser.calendar = [NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian];
+    parser.timeZone = NSTimeZone.localTimeZone;
+    parser.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss.SSSxxx";
+    NSDate *roundTripped = [parser dateFromString:s1];
+    ok(roundTripped != nil, "the stamp round-trips through its own format");
+    ok(fabs(roundTripped.timeIntervalSince1970 - d1.timeIntervalSince1970) < 1e-3,
+       "round-tripped instant matches the input to the millisecond");
+
+    // A day apart must differ in the date portion -- the whole point of this change.
+    NSDate *d2 = [d1 dateByAddingTimeInterval:86400];
+    NSString *date1 = [s1 substringToIndex:10];
+    NSString *date2 = [RZLogTimestamp(d2) substringToIndex:10];
+    ok(![date1 isEqualToString:date2], "a day apart produces a different date prefix");
+
+    // Determinism: the cached formatter must not be mutable state that drifts
+    // between calls.
+    eqs(RZLogTimestamp(d1), s1, "formatting the same instant twice is identical");
+}
+
 #pragma mark -
 
 int main(void) {
@@ -306,6 +363,7 @@ int main(void) {
         test_screen_hit();
         test_coordinates();
         test_config();
+        test_log_timestamp();
 
         printf("\n%d checks, %d failed\n", gChecks, gFails);
         if (gFails) { printf("FAILED\n"); return 1; }

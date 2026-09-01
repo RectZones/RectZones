@@ -188,3 +188,24 @@ NSDictionary *RZConfigDictionary(NSArray<RZTemplate *> *templates,
              @"gap": @(gap),
              @"shortcuts": shortcuts ?: @{}};
 }
+
+#pragma mark - Diagnostics
+
+NSString *RZLogTimestamp(NSDate *date) {
+    static NSDateFormatter *df;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        df = [NSDateFormatter new];
+        // Pinned: a user's 12-hour or non-Gregorian locale must not reshape a line
+        // that gets read by a grep and pasted into a bug report.
+        df.locale   = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+        df.calendar = [NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian];
+        // Auto-updating, so a DST change or travel mid-session is reflected without
+        // rebuilding the formatter.
+        df.timeZone = NSTimeZone.localTimeZone;
+        // xxx, not ZZZZZ: ZZZZZ collapses a zero offset to "Z" and the stamp stops
+        // being a constant 29 columns on a UTC machine.
+        df.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss.SSSxxx";
+    });
+    return [df stringFromDate:date];
+}
