@@ -77,11 +77,10 @@ jobs:
             src/main.m src/rzcore.m
 
       - name: Compiler warnings
-        # Informational, not a gate: the tree has one known -Wunused-function
-        # warning (RZTriggerSymbol). Once that is cleaned up, drop
-        # `continue-on-error` and add -Werror so warnings cannot creep back in.
-        continue-on-error: true
+        # A real gate: the tree compiles warning-free, and -Werror keeps it that
+        # way. -Wno-unused-parameter stays because Cocoa callbacks hand us
+        # arguments we are not required to read.
         run: |
           clang -O2 -fobjc-arc -Wall -Wextra \
-            -Wno-unused-parameter \
+            -Wno-unused-parameter -Werror \
             -fsyntax-only src/main.m src/rzcore.m

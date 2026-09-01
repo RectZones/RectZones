@@ -126,14 +126,6 @@ static CGEventFlags RZTriggerMask(void) {
     return kCGEventFlagMaskCommand;
 }
 
-static NSString *RZTriggerSymbol(void) {
-    NSString *t = RZStore.shared.trigger;
-    if ([t isEqualToString:@"alt"])  return @"⌥";
-    if ([t isEqualToString:@"ctrl"]) return @"⌃";
-    if ([t isEqualToString:@"fn"])   return @"🌐 fn";
-    return @"⌘";
-}
-
 #pragma mark - Coordinates
 // CG/AX: origin at the primary screen's TOP-LEFT, y grows down. AppKit: BOTTOM-LEFT, y grows up.
 
