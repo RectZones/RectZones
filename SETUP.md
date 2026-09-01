@@ -27,7 +27,7 @@ it from there — the permission binds to the copy that runs, so open the one th
    System Settings → Privacy & Security → Accessibility → RectZones **ON** (and it
    must STAY on).
 2. **Never claim it works without proof.** Two checks:
-   - Menu bar icon: **▦⚠** means no permission; it must read **▦**.
+   - Menu bar icon: a warning triangle on the icon means no permission; it must disappear.
    - `/tmp/rectzones.log` must contain `trusted=1` and `event tap installed`.
 3. If `trusted=0` persists — including when the list entry already shows **ON**, which
    is the usual case after a rebuild — toggling that entry is **NOT enough**. The row

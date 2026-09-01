@@ -25,7 +25,7 @@ single-file Objective-C app**: clang + Cocoa, zero external dependencies. Rectan
 | Editor (`RZEditor*`) | Code-built UI (no xibs — CLT has no ibtool). Canvas is `isFlipped=YES` to match the zone model. Selecting a template in the popup activates it. |
 | Shortcuts UI (`RZShortcutsUI`) | Press-to-record rows with mini previews (`RZMiniGridView`). Bare ⎋ cancels recording; modified ⎋ combos are recordable. |
 | `RZSettings` | One window, three tabs (Template Editor / Trigger Key / Shortcuts). |
-| `RZApp` | Menu bar item (▦ / ▦⚠ permission badge), permission polling, single-instance guard. |
+| `RZApp` | Menu bar item (template image drawn in `RZMenuBarImage`; a warning triangle badges the untrusted state), permission polling, single-instance guard. |
 | `RZ_SNAPSHOT` section | Alternate `main()` that renders the real UI views to PNGs for the README (no screen-recording permission needed). |
 
 ## Development loop

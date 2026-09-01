@@ -27,7 +27,7 @@ open build/RectZones.app
 Nothing else — no Xcode project, no package manager, no external libraries.
 
 Grant Accessibility when macOS asks (System Settings → Privacy & Security →
-Accessibility). The menu bar icon flips from **▦⚠** to **▦** once the app can
+Accessibility). The menu bar icon drops its warning triangle once the app can
 actually move windows.
 
 ## The development loop
