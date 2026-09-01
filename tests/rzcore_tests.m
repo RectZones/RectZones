@@ -352,6 +352,8 @@ static void test_log_timestamp(void) {
     // Determinism: the cached formatter must not be mutable state that drifts
     // between calls.
     eqs(RZLogTimestamp(d1), s1, "formatting the same instant twice is identical");
+}
+
 #pragma mark - Accessibility Zoom
 
 static void test_zoom_map(void) {

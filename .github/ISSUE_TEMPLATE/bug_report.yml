@@ -19,7 +19,7 @@ body:
         [README troubleshooting section](https://github.com/RectZones/RectZones#troubleshooting).
       options:
         - label: >
-            The menu bar icon shows ▦ (not ▦⚠). If it shows ▦⚠ after a rebuild,
+            The menu bar icon has no warning triangle. If the triangle is back after a rebuild,
             remove and re-add RectZones in System Settings → Privacy & Security
             → Accessibility — toggling it off and on does not work.
         - label: >

@@ -113,6 +113,7 @@ NSDictionary *RZConfigDictionary(NSArray<RZTemplate *> *templates,
 // numeric UTC offset — 2026-08-31T17:42:03.481+02:00. Always 29 characters. The date
 // arrives as an argument so the format can be pinned by a test.
 NSString *RZLogTimestamp(NSDate *date);
+
 #pragma mark - Accessibility Zoom
 
 // The screen point the user sees under the pointer while Accessibility Zoom is on.

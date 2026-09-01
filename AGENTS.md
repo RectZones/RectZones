@@ -134,11 +134,10 @@ gh pr create
     would produce a silent no-op. Clang's analyzer is the substitute.
     Note: pass no `-framework` flags to `--analyze`; it does not link, and under
     `-Werror` they become "unused linker input" errors.
-  - A third step reports `-Wall -Wextra` warnings over `src/main.m src/rzcore.m`. It is
-    still `continue-on-error` on `main`, held there by one dead function
-    (`RZTriggerSymbol`); PR #6 deletes it and adds `-Werror`, which turns the step into a
-    real gate. `-Wno-unused-parameter` stays either way — Cocoa callbacks hand us
-    arguments we are not required to read. Update this paragraph when #6 lands.
+  - A third step compiles `src/main.m src/rzcore.m` with `-Wall -Wextra -Werror`
+    (`-fsyntax-only`), so any new warning fails the job (PR #6, since the last dead
+    function went). `-Wno-unused-parameter` stays — Cocoa callbacks hand us arguments we
+    are not required to read. Run the same line locally before pushing.
 - Contributor-facing guidance lives in [CONTRIBUTING.md](CONTRIBUTING.md); what the app
   does on a user's machine, and how to verify a build, is in [SECURITY.md](SECURITY.md).
 
