@@ -131,6 +131,7 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
     RZTemplate *t = [self findUUID:uuid];
     if (t) [self.templates removeObject:t];
     if ([self.activeUUID isEqualToString:uuid]) self.activeUUID = self.templates[0].uuid;
+    if ([self.activePortraitUUID isEqualToString:uuid]) self.activePortraitUUID = nil;
     [self save];
 }
 
@@ -1560,10 +1561,14 @@ static RZApp *gApp;
     NSInteger i = self.popup.indexOfSelectedItem;
     if (i < 0 || i >= (NSInteger)RZStore.shared.templates.count) return;
     self.editing = RZStore.shared.templates[i];
-    // Selecting a template makes it active
-    RZStore.shared.activeUUID = self.editing.uuid;
-    [RZStore.shared save];
-    [RZHotkeys.shared resetCycle];
+    // Selecting a template makes it active. The portrait template is the exception:
+    // it already has its own slot, and writing it into the landscape slot as well
+    // would make both slots equal, which the next load reads as "no split".
+    if (![self.editing.uuid isEqualToString:RZStore.shared.activePortraitUUID]) {
+        RZStore.shared.activeUUID = self.editing.uuid;
+        [RZStore.shared save];
+        [RZHotkeys.shared resetCycle];
+    }
     [self reloadPopup];
     [self loadEditing];
 }
