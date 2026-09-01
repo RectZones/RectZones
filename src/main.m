@@ -1336,6 +1336,9 @@ static RZApp *gApp;
     self.editing = RZStore.shared.active;
     [self reloadPopup];
     [self loadEditing];
+    // The gap is global, not part of a template, so it is filled here rather than in
+    // loadEditing: reloading it on every template action wiped a value being typed.
+    self.gapField.integerValue = RZStore.shared.gap;
     return self.view;
 }
 
@@ -1437,6 +1440,11 @@ static RZApp *gApp;
     self.gapField = [[NSTextField alloc] initWithFrame:NSMakeRect(bx2, by + 1, 36, 24)];
     self.gapField.target = self;
     self.gapField.action = @selector(gapChanged);
+    // A field built in code only fires its action on Return, and Return here belongs to
+    // the default "Save & Use" button; nib-built fields also fire when editing ends. Ask
+    // for that, then every way out of the field (click elsewhere, Save & Use, closing or
+    // leaving the window) commits the typed value (gotcha 7).
+    ((NSTextFieldCell *)self.gapField.cell).sendsActionOnEndEditing = YES;
     [c addSubview:self.gapField];
     bx2 += 40;
     NSTextField *pxLabel = [NSTextField labelWithString:@"px"];
@@ -1477,7 +1485,6 @@ static RZApp *gApp;
     self.canvas.zones = RZCopyZones(self.editing.zones);
     self.canvas.selectedZone = self.canvas.zones.count ? 0 : -1;
     self.canvas.needsDisplay = YES;
-    self.gapField.integerValue = RZStore.shared.gap;
     [self clearDirty];
 }
 
@@ -1490,9 +1497,12 @@ static RZApp *gApp;
 }
 
 - (void)gapChanged {
-    RZStore.shared.gap = MAX(0, MIN(40, self.gapField.integerValue));
-    self.gapField.integerValue = RZStore.shared.gap;
+    NSInteger gap = MAX(0, MIN(40, self.gapField.integerValue));
+    self.gapField.integerValue = gap; // echo the clamp back
+    if (gap == RZStore.shared.gap) return;
+    RZStore.shared.gap = gap;
     [RZStore.shared save];
+    RZLog(@"gap set to %ld px", (long)gap);
 }
 
 - (void)templatePicked {
@@ -1575,6 +1585,7 @@ static RZApp *gApp;
 }
 
 - (void)saveTemplate {
+    [self.view.window makeFirstResponder:nil]; // Return lands here: commit a typed gap first
     if (!self.canvas.zones.count) return;
     self.editing.name = self.nameField.stringValue.length ? self.nameField.stringValue : @"Untitled";
     self.editing.zones = RZCopyZones(self.canvas.zones);
@@ -1967,7 +1978,14 @@ static RZApp *gApp;
     [self refreshTriggerRadios];
 }
 
+// Ending editing commits whatever is typed in the gap field (its cell sends the action
+// on end editing); the window is the natural boundary for "I am done with this value".
+- (void)windowDidResignKey:(NSNotification *)notification {
+    [notification.object makeFirstResponder:nil];
+}
+
 - (void)windowWillClose:(NSNotification *)notification {
+    [notification.object makeFirstResponder:nil];
     [RZShortcutsUI.shared cancelRecording];
     if (self.keyMonitor) { [NSEvent removeMonitor:self.keyMonitor]; self.keyMonitor = nil; }
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
