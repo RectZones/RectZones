@@ -354,6 +354,50 @@ static void test_log_timestamp(void) {
     eqs(RZLogTimestamp(d1), s1, "formatting the same instant twice is identical");
 }
 
+#pragma mark - Accessibility Zoom
+
+static void test_zoom_map(void) {
+    group("zoom map");
+    NSRect d = NSMakeRect(0, 0, 3024, 1964); // CG coordinates, top-left origin
+
+    // Off, or nonsense: the glass point passes through untouched.
+    NSPoint g = NSMakePoint(100, 200);
+    NSPoint r = RZZoomMapPoint(g, d, NSMakePoint(1512, 982), 1.0);
+    eqd(r.x, 100, "factor 1 is identity (x)");
+    eqd(r.y, 200, "factor 1 is identity (y)");
+    r = RZZoomMapPoint(g, d, NSMakePoint(1512, 982), 0);
+    eqd(r.x, 100, "factor 0 is identity");
+    r = RZZoomMapPoint(g, NSZeroRect, NSMakePoint(1512, 982), 2);
+    eqd(r.y, 200, "empty display is identity");
+
+    // Zoomed 2x around the display centre: the glass corners see the quarter points.
+    NSPoint c = NSMakePoint(1512, 982);
+    r = RZZoomMapPoint(NSMakePoint(0, 0), d, c, 2);
+    eqd(r.x, 756, "top-left of the glass shows x = 1/4");
+    eqd(r.y, 491, "top-left of the glass shows y = 1/4");
+    r = RZZoomMapPoint(NSMakePoint(3024, 1964), d, c, 2);
+    eqd(r.x, 2268, "bottom-right of the glass shows x = 3/4");
+    eqd(r.y, 1473, "bottom-right of the glass shows y = 3/4");
+    r = RZZoomMapPoint(c, d, c, 2);
+    eqd(r.x, 1512, "glass centre shows the zoom centre (x)");
+    eqd(r.y, 982, "glass centre shows the zoom centre (y)");
+
+    // Measured on a 3024x1964 display: with the pointer at the top edge the window
+    // server reports the centre 1964/(2*2.88) = 341 px below the top. The rounded
+    // centre overshoots the edge by a fraction of a pixel; the clamp absorbs it.
+    r = RZZoomMapPoint(NSMakePoint(1512, 0), d, NSMakePoint(1512, 340), 2.88);
+    eqd(r.y, 0, "top edge of the glass is the top edge of the screen");
+    eqd(r.x, 1512, "x is untouched by a y clamp");
+    r = RZZoomMapPoint(NSMakePoint(3024, 1104), d, NSMakePoint(2280, 1104), 2.032);
+    eqd(r.x, 3024, "right edge of the glass is the right edge of the screen");
+
+    // A display that is not at the CG origin maps within its own frame.
+    NSRect d2 = NSMakeRect(3024, 0, 1920, 1080);
+    r = RZZoomMapPoint(NSMakePoint(3024, 0), d2, NSMakePoint(3984, 540), 2);
+    eqd(r.x, 3504, "second display: its own centre is the fixed point (x)");
+    eqd(r.y, 270, "second display: its own centre is the fixed point (y)");
+}
+
 #pragma mark -
 
 int main(void) {
@@ -364,6 +408,7 @@ int main(void) {
         test_coordinates();
         test_config();
         test_log_timestamp();
+        test_zoom_map();
 
         printf("\n%d checks, %d failed\n", gChecks, gFails);
         if (gFails) { printf("FAILED\n"); return 1; }

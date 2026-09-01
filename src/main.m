@@ -5,6 +5,7 @@
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <Carbon/Carbon.h>
+#import <dlfcn.h>
 
 // Zone geometry, placement math, config encoding, and the log timestamp format.
 // Kept free of AppKit and the filesystem so the test target can link it on its
@@ -151,6 +152,46 @@ static NSScreen *RZScreenAtCG(CGPoint p) {
     for (NSScreen *s in screens) [frames addObject:[NSValue valueWithRect:s.frame]];
     NSInteger i = RZScreenIndexAtPoint(RZNSFromCG(p), frames);
     return i < 0 ? nil : screens[(NSUInteger)i];
+}
+
+#pragma mark - Accessibility Zoom
+
+// The event tap reports where the pointer sits on the physical display. With
+// Accessibility Zoom on, the display shows a magnified window of the screen, so that
+// position is not the point the user sees under the pointer, and every zone used to be
+// picked as if zoom were off (gotcha 6). macOS exposes the zoom geometry (window centre
+// and factor, CG coordinates) only through a private SkyLight call, resolved here at
+// runtime: if the symbol is missing or the call fails, the pointer is used as reported
+// and the app behaves exactly as before. The arithmetic is RZZoomMapPoint in rzcore.m.
+typedef int RZCGSConnectionID;
+typedef RZCGSConnectionID (*RZCGSMainConnectionIDFn)(void);
+typedef int (*RZCGSGetZoomParametersFn)(RZCGSConnectionID, CGPoint *, double *, bool *);
+
+static BOOL RZZoomParameters(CGPoint *centre, double *factor) {
+    static RZCGSMainConnectionIDFn mainConnection;
+    static RZCGSGetZoomParametersFn getZoomParameters;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        void *skylight = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY);
+        void *handle = skylight ?: RTLD_DEFAULT;
+        mainConnection = (RZCGSMainConnectionIDFn)dlsym(handle, "CGSMainConnectionID");
+        getZoomParameters = (RZCGSGetZoomParametersFn)dlsym(handle, "CGSGetZoomParameters");
+        RZLog(@"zoom geometry %s", (mainConnection && getZoomParameters)
+              ? "available" : "unavailable: pointer used as reported while zoomed");
+    });
+    if (!mainConnection || !getZoomParameters || !UAZoomEnabled()) return NO;
+    bool smoothed = false;
+    if (getZoomParameters(mainConnection(), centre, factor, &smoothed) != 0) return NO;
+    return *factor > 1.0001;
+}
+
+// The screen point under the pointer, zoomed or not (CG coordinates in and out).
+static CGPoint RZPointerPoint(CGPoint glass) {
+    CGPoint centre;
+    double factor;
+    if (!RZZoomParameters(&centre, &factor)) return glass;
+    NSScreen *screen = RZScreenAtCG(glass) ?: NSScreen.screens.firstObject;
+    return RZZoomMapPoint(glass, RZCGFromNS(screen.frame), centre, factor);
 }
 
 static NSRect RZPaddedNS(NSRect r) {
@@ -491,6 +532,12 @@ static CGEventRef RZTapCB(CGEventTapProxy proxy, CGEventType type, CGEventRef ev
         return;
     }
     CGPoint p = CGEventGetLocation(event);
+    // Only the button events drive placement; the zoom lookup is a window-server
+    // round trip, so plain pointer motion is left alone.
+    if (type == kCGEventLeftMouseDown || type == kCGEventLeftMouseDragged ||
+        type == kCGEventLeftMouseUp) {
+        p = RZPointerPoint(p);
+    }
 
     // Modifier state is read from EVERY event: trusting flagsChanged alone
     // misses remapped keys (e.g. 🌐fn→⌘); mouse events always carry the
@@ -623,6 +670,12 @@ static CGEventRef RZTapCB(CGEventTapProxy proxy, CGEventType type, CGEventRef ev
     if (!self.overlayActive) {
         RZLog(@"session started: template=%@ zones=%lu", RZStore.shared.active.name,
               (unsigned long)RZStore.shared.active.zones.count);
+        CGPoint zoomCentre;
+        double zoomFactor;
+        if (RZZoomParameters(&zoomCentre, &zoomFactor)) {
+            RZLog(@"zoom: factor=%.2f centre=(%.0f,%.0f) pointer=(%.0f,%.0f)",
+                  zoomFactor, zoomCentre.x, zoomCentre.y, p.x, p.y);
+        }
         self.logHover = -2;
         [self clearSnap]; // trigger overlay takes priority: hide the edge footprint
     }
@@ -1497,8 +1550,9 @@ static RZApp *gApp;
 }
 
 - (void)applyGrid {
-    NSInteger cols = MAX(1, MIN(8, self.colsField.integerValue));
-    NSInteger rows = MAX(1, MIN(8, self.rowsField.integerValue));
+    // 16 keeps the cells of a 3024 px display at 1x above 180 px; 8 was arbitrary.
+    NSInteger cols = MAX(1, MIN(16, self.colsField.integerValue));
+    NSInteger rows = MAX(1, MIN(16, self.rowsField.integerValue));
     self.colsField.integerValue = cols;
     self.rowsField.integerValue = rows;
     [self.canvas.zones removeAllObjects];

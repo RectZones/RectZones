@@ -113,3 +113,14 @@ NSDictionary *RZConfigDictionary(NSArray<RZTemplate *> *templates,
 // numeric UTC offset — 2026-08-31T17:42:03.481+02:00. Always 29 characters. The date
 // arrives as an argument so the format can be pinned by a test.
 NSString *RZLogTimestamp(NSDate *date);
+
+#pragma mark - Accessibility Zoom
+
+// The screen point the user sees under the pointer while Accessibility Zoom is on.
+// `glass` is where the event tap says the pointer is, which with Zoom on is a position
+// on the physical display, not on the screen the user is looking at: the display shows
+// a window of the screen magnified `factor` times around `centre`. All points and the
+// display rect are CG coordinates (top-left origin). The result is clamped to the
+// display, since the magnified window never leaves it. `factor` <= 1 (or an empty
+// display) returns `glass` unchanged, so callers can pass whatever the system reports.
+NSPoint RZZoomMapPoint(NSPoint glass, NSRect display, NSPoint centre, double factor);
