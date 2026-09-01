@@ -29,7 +29,8 @@
   display. Every shortcut row shows a tiny preview of what it covers.
 - **Template editor** — draw zones freely or type columns × rows and hit Apply Grid.
   Name it, save it, switch templates with one click.
-- **Adjustable gap** between placed windows (0–40 px), multi-monitor aware,
+- **Adjustable gap** between placed windows (0–40 px; type it in the editor, it takes
+  effect as soon as you leave the field), multi-monitor aware,
   single Objective-C file, zero dependencies.
 
 ## Screenshots

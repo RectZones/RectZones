@@ -98,6 +98,14 @@ open build/RectZones.app
    `zoom: factor=… centre=… pointer=…` while zoomed; compare the pointer with the
    `hover:` zone that follows when a zoom report comes in.
 
+7. **A text field built in code fires its action only on Return.** Nib-built fields
+   also fire when editing ends; code-built ones have `sendsActionOnEndEditing` off, so
+   `makeFirstResponder:nil` ends editing (the value updates) without any action — verified
+   with a scratch AppKit program: action count 0, and 1 once the flag is on. In the
+   editor Return belongs to the default "Save & Use" button, so a typed gap had no way at
+   all to reach the store (#17). Any field whose value must persist gets the flag at
+   creation, and the window commits on resign-key and close by ending editing.
+
 ## Landing a change
 
 `main` is protected: no direct pushes, and every change lands through a pull request with
