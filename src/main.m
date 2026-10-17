@@ -1616,9 +1616,10 @@ static RZApp *gApp;
 }
 
 - (void)applyGrid {
-    // 16 keeps the cells of a 3024 px display at 1x above 180 px; 8 was arbitrary.
-    NSInteger cols = MAX(1, MIN(16, self.colsField.integerValue));
-    NSInteger rows = MAX(1, MIN(16, self.rowsField.integerValue));
+    // No upper cap: zones are fractions of the screen, nothing downstream depends on
+    // the count. The floor of 1 is what keeps 1.0 / cols from dividing by zero.
+    NSInteger cols = MAX(1, self.colsField.integerValue);
+    NSInteger rows = MAX(1, self.rowsField.integerValue);
     self.colsField.integerValue = cols;
     self.rowsField.integerValue = rows;
     [self.canvas.zones removeAllObjects];
