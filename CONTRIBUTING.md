@@ -95,7 +95,7 @@ Screenshots in `docs/` are generated from the real UI, not captured by hand:
 
 ```bash
 clang -DRZ_SNAPSHOT -fobjc-arc src/main.m -o /tmp/rz-snap \
-  -framework Cocoa -framework Carbon -framework ApplicationServices
+  -framework Cocoa -framework Carbon -framework ApplicationServices -framework QuartzCore
 /tmp/rz-snap docs
 ```
 

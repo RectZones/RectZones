@@ -5,6 +5,7 @@
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <Carbon/Carbon.h>
+#import <QuartzCore/QuartzCore.h>
 #import <dlfcn.h>
 
 // Zone geometry, placement math, config encoding, and the log timestamp format.
@@ -229,7 +230,71 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
 
 #pragma mark - Overlay
 
-@interface RZZoneView : NSView
+// The overlay views draw nothing. Each outline is a plain CALayer (background,
+// border, corner radius) that the window server composites from those
+// properties alone, so no bitmap exists behind it. They used to paint
+// screen-sized panels in -drawRect:, which gave every panel a backing store as
+// large as its display at 8 bytes a pixel, and hiding a panel kept it: on a 6K
+// screen that was a quarter of a gigabyte per buffer, two to three buffers deep.
+@interface RZOutlineView : NSView
+@end
+
+@implementation RZOutlineView {
+    NSMutableArray<CALayer *> *_outlines;
+}
+
+- (instancetype)initWithFrame:(NSRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        _outlines = [NSMutableArray array];
+        self.wantsLayer = YES;
+    }
+    return self;
+}
+
+- (BOOL)wantsUpdateLayer {
+    return YES;
+}
+
+// Subclasses style outlines 0..n-1 and return n; any left over from a longer
+// list shown earlier (a template with more zones) are dropped.
+- (NSUInteger)styleOutlines {
+    return 0;
+}
+
+- (void)updateLayer {
+    // No implicit animation: a highlight must follow the pointer, not ease after it.
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    NSUInteger n = [self styleOutlines];
+    while (_outlines.count > n) {
+        [_outlines.lastObject removeFromSuperlayer];
+        [_outlines removeLastObject];
+    }
+    [CATransaction commit];
+}
+
+// Outline i traces the rounded rect r (radius 10) with a line lw wide. A bezier
+// stroke straddles its path while a layer border lies inside the layer's edge,
+// so the layer grows by lw/2 and its radius with it: outer and inner edges then
+// fall exactly where the stroke's did.
+- (void)outline:(NSUInteger)i around:(NSRect)r width:(CGFloat)lw
+           fill:(NSColor *)fill stroke:(NSColor *)stroke {
+    while (_outlines.count <= i) {
+        CALayer *l = [CALayer layer];
+        [self.layer addSublayer:l];
+        [_outlines addObject:l];
+    }
+    CALayer *l = _outlines[i];
+    l.frame = NSInsetRect(r, -lw / 2, -lw / 2);
+    l.cornerRadius = 10 + lw / 2;
+    l.borderWidth = lw;
+    l.backgroundColor = fill.CGColor;
+    l.borderColor = stroke.CGColor;
+}
+
+@end
+
+@interface RZZoneView : RZOutlineView
 @property (nonatomic, strong) NSArray *zones;
 @property (nonatomic) NSInteger hovered;
 @property (nonatomic, strong) NSIndexSet *selected;
@@ -239,8 +304,9 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
 
 @implementation RZZoneView
 
-- (void)drawRect:(NSRect)dirtyRect {
+- (NSUInteger)styleOutlines {
     NSSize sz = self.bounds.size;
+    // Read on every update: the user can change the accent colour at any time.
     NSColor *accent = NSColor.controlAccentColor;
     // The panel is sized to the screen's visibleFrame and this view fills it, so
     // view points and screen points are the same thing — verified, not assumed —
@@ -262,47 +328,60 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
         // only place the preview is allowed to differ from the placement, it is
         // sub-pixel at any real size, and it costs nothing in accuracy.
         if (self.gap <= 0) r = NSInsetRect(r, 1, 1);
-        NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:r xRadius:10 yRadius:10];
         BOOL isSel = [self.selected containsIndex:i];
         BOOL isCov = !isSel && [self.covered containsIndex:i];
         BOOL isHov = (NSInteger)i == self.hovered;
-        if (isSel)      [[accent colorWithAlphaComponent:0.42] setFill];
-        else if (isCov) [[accent colorWithAlphaComponent:0.33] setFill];
-        else if (isHov) [[accent colorWithAlphaComponent:0.30] setFill];
-        else            [[[NSColor grayColor] colorWithAlphaComponent:0.14] setFill];
-        [path fill];
-        if (isSel || isCov || isHov) {
-            [[accent colorWithAlphaComponent:0.95] setStroke];
-            path.lineWidth = isSel ? 3 : 2.5;
-        } else {
-            [[[NSColor grayColor] colorWithAlphaComponent:0.55] setStroke];
-            path.lineWidth = 1.5;
-        }
-        [path stroke];
+        NSColor *fill;
+        if (isSel)      fill = [accent colorWithAlphaComponent:0.42];
+        else if (isCov) fill = [accent colorWithAlphaComponent:0.33];
+        else if (isHov) fill = [accent colorWithAlphaComponent:0.30];
+        else            fill = [[NSColor grayColor] colorWithAlphaComponent:0.14];
+        BOOL lit = isSel || isCov || isHov;
+        NSColor *stroke = lit ? [accent colorWithAlphaComponent:0.95]
+                              : [[NSColor grayColor] colorWithAlphaComponent:0.55];
+        [self outline:i around:r width:(isSel ? 3 : lit ? 2.5 : 1.5) fill:fill stroke:stroke];
     }
+    return self.zones.count;
 }
 
 @end
 
 // Footprint showing the single target rect during edge/corner snapping.
-@interface RZFootprintView : NSView
+@interface RZFootprintView : RZOutlineView
 @end
 
 @implementation RZFootprintView
-- (void)drawRect:(NSRect)dirtyRect {
+- (NSUInteger)styleOutlines {
     // The panel is now the exact rect the window will occupy, so inset only
     // enough to keep the 3 pt stroke inside the bounds. The old 4 pt inset was
     // cosmetic and, on top of a panel that ignored the gap entirely, made the
     // footprint doubly wrong about where the window was going.
-    NSBezierPath *p = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 1.5, 1.5)
-                                                      xRadius:10 yRadius:10];
-    [[NSColor.controlAccentColor colorWithAlphaComponent:0.28] setFill];
-    [p fill];
-    [[NSColor.controlAccentColor colorWithAlphaComponent:0.9] setStroke];
-    p.lineWidth = 3;
-    [p stroke];
+    NSColor *accent = NSColor.controlAccentColor;
+    [self outline:0 around:NSInsetRect(self.bounds, 1.5, 1.5) width:3
+             fill:[accent colorWithAlphaComponent:0.28] stroke:[accent colorWithAlphaComponent:0.9]];
+    return 1;
 }
 @end
+
+// Click-through, borderless, on every Space, above ordinary windows.
+static NSPanel *RZOverlayPanel(NSRect frame, NSView *content) {
+    NSPanel *p = [[NSPanel alloc] initWithContentRect:frame
+                                            styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                                              backing:NSBackingStoreBuffered
+                                                defer:NO];
+    p.opaque = NO;
+    p.backgroundColor = NSColor.clearColor;
+    p.hasShadow = NO;
+    p.ignoresMouseEvents = YES;
+    p.level = NSStatusWindowLevel;
+    p.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+                           NSWindowCollectionBehaviorFullScreenAuxiliary |
+                           NSWindowCollectionBehaviorTransient;
+    // The colour space sets the window surface's pixel format: under -drawRect:, 8 bytes a pixel on 6K, half in sRGB.
+    p.colorSpace = NSColorSpace.sRGBColorSpace;
+    p.contentView = content;
+    return p;
+}
 
 @interface RZFootprint : NSObject
 @property (nonatomic, strong) NSPanel *panel;
@@ -321,22 +400,8 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
 }
 
 - (void)showRect:(NSRect)nsRect {
-    if (!self.panel) {
-        NSPanel *p = [[NSPanel alloc] initWithContentRect:nsRect
-                                                styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
-                                                  backing:NSBackingStoreBuffered
-                                                    defer:NO];
-        p.opaque = NO;
-        p.backgroundColor = NSColor.clearColor;
-        p.hasShadow = NO;
-        p.ignoresMouseEvents = YES;
-        p.level = NSStatusWindowLevel;
-        p.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
-                               NSWindowCollectionBehaviorFullScreenAuxiliary |
-                               NSWindowCollectionBehaviorTransient;
-        p.contentView = [RZFootprintView new];
-        self.panel = p;
-    }
+    if (!self.panel) self.panel = RZOverlayPanel(nsRect, [RZFootprintView new]);
+    self.panel.contentView.needsDisplay = YES;
     [self.panel setFrame:nsRect display:YES];
     [self.panel orderFrontRegardless];
 }
@@ -374,22 +439,7 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
     if (self.windows.count != screens.count) {
         for (NSPanel *w in self.windows) [w orderOut:nil];
         [self.windows removeAllObjects];
-        for (NSScreen *s in screens) {
-            NSPanel *p = [[NSPanel alloc] initWithContentRect:s.visibleFrame
-                                                    styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
-                                                      backing:NSBackingStoreBuffered
-                                                        defer:NO];
-            p.opaque = NO;
-            p.backgroundColor = NSColor.clearColor;
-            p.hasShadow = NO;
-            p.ignoresMouseEvents = YES;
-            p.level = NSStatusWindowLevel;
-            p.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
-                                   NSWindowCollectionBehaviorFullScreenAuxiliary |
-                                   NSWindowCollectionBehaviorTransient;
-            p.contentView = [RZZoneView new];
-            [self.windows addObject:p];
-        }
+        for (NSScreen *s in screens) [self.windows addObject:RZOverlayPanel(s.visibleFrame, [RZZoneView new])];
     }
     for (NSUInteger i = 0; i < screens.count; i++) {
         NSScreen *s = screens[i];
@@ -404,6 +454,7 @@ static NSInteger RZZoneIndexAtCG(CGPoint p, NSScreen *screen, NSArray *zones) {
         v.hovered = (s == hovScreen) ? hovered : -1;
         v.selected = selected[@(i)] ?: [NSIndexSet indexSet];
         v.covered = covered[@(i)] ?: [NSIndexSet indexSet];
+        // Only layer properties change from here on, never a bitmap.
         v.needsDisplay = YES;
         [p orderFrontRegardless];
     }
@@ -2236,7 +2287,7 @@ int main(int argc, const char *argv[]) {
 #pragma mark - README screenshot generator
 // Renders the real UI views to PNG offscreen (for README/docs).
 // Derleme: clang -DRZ_SNAPSHOT -fobjc-arc src/main.m src/rzcore.m -o /tmp/rz-snap \
-//          -framework Cocoa -framework Carbon -framework ApplicationServices
+//          -framework Cocoa -framework Carbon -framework ApplicationServices -framework QuartzCore
 
 @interface RZSettings (RZSnap)
 - (NSView *)buildTriggerView;
