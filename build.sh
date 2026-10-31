@@ -38,7 +38,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 clang -O2 -fobjc-arc \
   "$DIR/src/main.m" "$DIR/src/rzcore.m" \
   -o "$APP/Contents/MacOS/RectZones" \
-  -framework Cocoa -framework ApplicationServices -framework Carbon
+  -framework Cocoa -framework ApplicationServices -framework Carbon -framework QuartzCore
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
