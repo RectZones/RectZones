@@ -473,17 +473,63 @@ static BOOL RZWindowFrameGet(AXUIElementRef win, CGRect *out) {
     return YES;
 }
 
+static void RZSetWindowPosition(AXUIElementRef win, CGPoint point) {
+    AXValueRef value = AXValueCreate(kAXValueTypeCGPoint, &point);
+    if (value) {
+        AXUIElementSetAttributeValue(win, kAXPositionAttribute, value);
+        CFRelease(value);
+    }
+}
+
+static void RZSetWindowSize(AXUIElementRef win, CGSize size) {
+    AXValueRef value = AXValueCreate(kAXValueTypeCGSize, &size);
+    if (value) {
+        AXUIElementSetAttributeValue(win, kAXSizeAttribute, value);
+        CFRelease(value);
+    }
+}
+
 static void RZSetWindowFrame(AXUIElementRef win, CGRect rect) {
-    CGPoint pt = rect.origin;
-    CGSize sz = rect.size;
-    AXValueRef pv = AXValueCreate(kAXValueTypeCGPoint, &pt);
-    AXValueRef sv = AXValueCreate(kAXValueTypeCGSize, &sz);
-    if (pv) AXUIElementSetAttributeValue(win, CFSTR("AXPosition"), pv);
-    if (sv) AXUIElementSetAttributeValue(win, CFSTR("AXSize"), sv);
-    // Some apps shift position on resize; write position once more
-    if (pv) AXUIElementSetAttributeValue(win, CFSTR("AXPosition"), pv);
-    if (pv) CFRelease(pv);
-    if (sv) CFRelease(sv);
+    static NSUInteger placementGeneration;
+    NSUInteger generation = ++placementGeneration;
+    CGRect before;
+    BOOL shrinking = RZWindowFrameGet(win, &before) &&
+        (before.size.height > rect.size.height + 1 || before.size.width > rect.size.width + 1);
+    if (shrinking) {
+        // Moving a tall Safari window down first can leave its bottom behind the Dock.
+        RZSetWindowSize(win, CGSizeMake(MIN(before.size.width, rect.size.width),
+                                        MIN(before.size.height, rect.size.height)));
+    }
+    RZSetWindowPosition(win, rect.origin);
+    RZSetWindowSize(win, rect.size);
+    RZSetWindowPosition(win, rect.origin);
+    if (!shrinking) return;
+
+    // An app can finish its own drag after the AX writes. Retry once at the
+    // destination unless a newer placement or mouse press has taken over.
+    id window = CFBridgingRelease(CFRetain(win));
+    int64_t clicks = CGEventSourceCounterForEventType(kCGEventSourceStateCombinedSessionState, kCGEventLeftMouseDown);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 150 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        if (generation != placementGeneration ||
+            clicks != CGEventSourceCounterForEventType(kCGEventSourceStateCombinedSessionState, kCGEventLeftMouseDown)) return;
+        AXUIElementRef target = (__bridge AXUIElementRef)window;
+        CGRect actual;
+        if (!RZWindowFrameGet(target, &actual)) return;
+        if (fabs(actual.origin.x - rect.origin.x) <= 1 && fabs(actual.origin.y - rect.origin.y) <= 1 &&
+            fabs(actual.size.width - rect.size.width) <= 1 && fabs(actual.size.height - rect.size.height) <= 1) return;
+        RZLog(@"retry placement: actual=%@ requested=%@", NSStringFromRect(actual), NSStringFromRect(rect));
+        RZSetWindowSize(target, rect.size);
+        if (!RZWindowFrameGet(target, &actual)) return;
+        // Honour an app's minimum size while keeping its edges in the work area.
+        NSScreen *screen = RZScreenAtCG(CGPointMake(CGRectGetMidX(rect), CGRectGetMidY(rect)));
+        CGPoint point = rect.origin;
+        if (screen) {
+            CGRect area = RZCGFromNS(screen.visibleFrame);
+            point.x = MAX(CGRectGetMinX(area), MIN(point.x, CGRectGetMaxX(area) - actual.size.width));
+            point.y = MAX(CGRectGetMinY(area), MIN(point.y, CGRectGetMaxY(area) - actual.size.height));
+        }
+        RZSetWindowPosition(target, point);
+    });
 }
 
 #pragma mark - Drag monitor
