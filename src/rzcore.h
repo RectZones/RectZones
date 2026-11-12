@@ -117,13 +117,49 @@ BOOL RZFrameIsPortrait(NSRect frame);
 // template for every screen — until someone deliberately assigns a second one.
 NSString *RZActiveUUIDFromConfig(NSDictionary *cfg, BOOL portrait);
 
+#pragma mark - Display binding
+
+// The stable identity of one physical display, built from the EDID numbers
+// CoreGraphics exposes (CGDisplayVendorNumber / CGDisplayModelNumber /
+// CGDisplaySerialNumber). None of them change when a display is unplugged and
+// replugged, moved to a different port, or set to another resolution, so this
+// is what a per-display template binding is keyed by. CGDirectDisplayID, by
+// contrast, is handed out fresh on every connect and never appears here.
+NSString *RZDisplayIdentityFromNumbers(NSUInteger vendor, NSUInteger model, NSUInteger serial);
+
+// identity → template uuid. Decoded from displayActive entries of the shape
+// {"template": uuid, "name": display name}; a hand-edited config cannot
+// smuggle other types through — entries that are not a dictionary with a
+// non-empty string "template" are dropped. Never nil.
+NSDictionary<NSString *, NSString *> *RZDisplayActiveFromConfig(NSDictionary *cfg);
+
+// identity → display name, the label for the same entries. Placement never
+// reads it; it exists so the editor can still name a bound display that is
+// currently unplugged.
+NSDictionary<NSString *, NSString *> *RZDisplayNamesFromConfig(NSDictionary *cfg);
+
+// Which template a display uses: the template bound to this identity when it
+// names a live template, else the portrait choice on a portrait display, else
+// the default. Nil identity and empty displayActive reproduce exactly what the
+// app did before bindings existed.
+NSString *RZTemplateUUIDForDisplay(NSDictionary<NSString *, NSString *> *displayActive,
+                                   NSString *identity,
+                                   NSString *activePortraitUUID,
+                                   BOOL portrait,
+                                   NSString *activeUUID,
+                                   NSArray<RZTemplate *> *templates);
+
 // Encoding, ready for NSJSONSerialization. activePortraitUUID may be nil, which
 // is how "no separate portrait template" is represented — the key is then absent
 // rather than duplicating the landscape choice, so the file stays readable by an
-// older build.
+// older build. displayActive may be nil or empty, which is likewise omitted;
+// displayNames only survives for identities that have a binding, so a name can
+// never outlive the binding it labels.
 NSDictionary *RZConfigDictionary(NSArray<RZTemplate *> *templates,
                                  NSString *activeUUID,
                                  NSString *activePortraitUUID,
+                                 NSDictionary<NSString *, NSString *> *displayActive,
+                                 NSDictionary<NSString *, NSString *> *displayNames,
                                  NSString *trigger,
                                  NSInteger customKey,
                                  NSInteger gap,

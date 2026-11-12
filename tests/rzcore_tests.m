@@ -232,7 +232,7 @@ static void test_config(void) {
     ok([RZTriggerFromConfig(@{@"trigger": @"fn"}) isEqualToString:@"fn"], "explicit trigger is read");
 
     group("config round trip");
-    NSDictionary *cfg = RZConfigDictionary(RZPresetTemplates(), @"abc", nil, @"alt", 7, 12, RZDefaultShortcuts());
+    NSDictionary *cfg = RZConfigDictionary(RZPresetTemplates(), @"abc", nil, nil, nil, @"alt", 7, 12, RZDefaultShortcuts());
     ok([NSJSONSerialization isValidJSONObject:cfg], "encoded config is serialisable");
     eqi((NSInteger)[cfg[@"templates"] count], 5, "all templates encoded");
     ok([cfg[@"trigger"] isEqualToString:@"alt"], "trigger encoded");
@@ -323,17 +323,94 @@ static void test_config(void) {
     NSArray<RZTemplate *> *ps = RZPresetTemplates();
     // Absent, not mirrored: an older build must not meet a key it cannot read,
     // and "no portrait template" has to survive a round trip as absent.
-    NSDictionary *noSplit = RZConfigDictionary(ps, @"aaa", nil, @"cmd", 0, 8, RZDefaultShortcuts());
+    NSDictionary *noSplit = RZConfigDictionary(ps, @"aaa", nil, nil, nil, @"cmd", 0, 8, RZDefaultShortcuts());
     ok(noSplit[@"activePortrait"] == nil, "no portrait template writes no key at all");
     ok([RZActiveUUIDFromConfig(noSplit, YES) isEqualToString:@"aaa"], "and still reads back as one template everywhere");
 
-    NSDictionary *withSplit = RZConfigDictionary(ps, @"aaa", @"bbb", @"cmd", 0, 8, RZDefaultShortcuts());
+    NSDictionary *withSplit = RZConfigDictionary(ps, @"aaa", @"bbb", nil, nil, @"cmd", 0, 8, RZDefaultShortcuts());
     ok([withSplit[@"activePortrait"] isEqualToString:@"bbb"], "a portrait template is written");
     ok([RZActiveUUIDFromConfig(withSplit, YES) isEqualToString:@"bbb"], "and reads back");
     ok([RZActiveUUIDFromConfig(withSplit, NO) isEqualToString:@"aaa"], "without disturbing landscape");
     ok([NSJSONSerialization isValidJSONObject:withSplit], "still serialisable");
-    ok(RZConfigDictionary(ps, @"aaa", @"", @"cmd", 0, 8, nil)[@"activePortrait"] == nil,
+    ok(RZConfigDictionary(ps, @"aaa", @"", nil, nil, @"cmd", 0, 8, nil)[@"activePortrait"] == nil,
        "an empty portrait uuid is treated as unset, not written as an empty string");
+
+    group("display identity");
+    // The identity keys per-display bindings, so what matters is what it does
+    // NOT contain: no CGDirectDisplayID (new on every connect), no resolution,
+    // no position. Only the EDID numbers.
+    ok([RZDisplayIdentityFromNumbers(4268, 42856, 1234567) isEqualToString:@"4268-42856-1234567"],
+       "vendor-model-serial is the whole identity");
+    ok(![RZDisplayIdentityFromNumbers(4268, 42856, 1) isEqualToString:RZDisplayIdentityFromNumbers(4268, 42856, 2)],
+       "two identical models are told apart by serial");
+    ok([RZDisplayIdentityFromNumbers(1552, 18524, 0) isEqualToString:@"1552-18524-0"],
+       "a panel with no serial still gets a stable key");
+
+    group("display binding decoding");
+    ok(RZDisplayActiveFromConfig(nil).count == 0, "no config, no bindings");
+    ok(RZDisplayNamesFromConfig(nil).count == 0, "no config, no labels");
+    NSDictionary *bound = @{@"displayActive": @{@"d1": @{@"template": @"aaa", @"name": @"DELL U2719D"},
+                                                @"d2": @{@"template": @"bbb"}}};
+    ok([RZDisplayActiveFromConfig(bound)[@"d1"] isEqualToString:@"aaa"], "a binding decodes");
+    ok([RZDisplayNamesFromConfig(bound)[@"d1"] isEqualToString:@"DELL U2719D"], "its label decodes");
+    ok(RZDisplayNamesFromConfig(bound)[@"d2"] == nil, "a binding without a label is fine");
+    // A hand-edited config must drop bad entries, never crash or half-bind.
+    eqi(RZDisplayActiveFromConfig(@{@"displayActive": @"nope"}).count, 0, "a non-dictionary is ignored");
+    eqi(RZDisplayActiveFromConfig(@{@"displayActive": @{@"d": @7}}).count, 0, "a junk entry is dropped");
+    eqi(RZDisplayActiveFromConfig(@{@"displayActive": @{@"d": @"aaa"}}).count, 0, "a bare string is not an entry");
+    eqi(RZDisplayActiveFromConfig(@{@"displayActive": @{@"d": @{@"template": @""}}}).count, 0, "an empty uuid is dropped");
+    eqi(RZDisplayActiveFromConfig(@{@"displayActive": @{@"d": @{@"name": @"x"}}}).count, 0, "a label without a template is dropped");
+    eqi(RZDisplayActiveFromConfig(@{@"displayActive":
+            @{[NSNumber numberWithInt:7]: @{@"template": @"aaa"}}}).count, 0, "a non-string identity is dropped");
+
+    group("display binding precedence");
+    RZTemplate *tdef = RZMakeTemplate(@"Default", @[RZZone(0, 0, 1, 1)]);
+    RZTemplate *tpor = RZMakeTemplate(@"Portrait", @[RZZone(0, 0, 1, 1)]);
+    RZTemplate *tmon = RZMakeTemplate(@"Monitor", @[RZZone(0, 0, 1, 1)]);
+    NSArray<RZTemplate *> *dts = @[tdef, tpor, tmon];
+    NSDictionary *one = @{@"d1": tmon.uuid};
+    // The named binding wins on any display of that identity — a user who bound
+    // a monitor while it was landscape keeps it when they rotate the panel.
+    ok([RZTemplateUUIDForDisplay(one, @"d1", tpor.uuid, NO, tdef.uuid, dts) isEqualToString:tmon.uuid],
+       "a bound display uses its template");
+    ok([RZTemplateUUIDForDisplay(one, @"d1", tpor.uuid, YES, tdef.uuid, dts) isEqualToString:tmon.uuid],
+       "the binding outranks even the portrait choice");
+    // Every other display resolves exactly as it did before bindings existed.
+    ok([RZTemplateUUIDForDisplay(one, @"d2", tpor.uuid, YES, tdef.uuid, dts) isEqualToString:tpor.uuid],
+       "an unbound portrait display still gets the portrait template");
+    ok([RZTemplateUUIDForDisplay(one, @"d2", tpor.uuid, NO, tdef.uuid, dts) isEqualToString:tdef.uuid],
+       "an unbound landscape display still gets the default");
+    // A binding to a template that no longer exists must fall through, not strand
+    // the display on a nil grid.
+    ok([RZTemplateUUIDForDisplay(@{@"d1": @"gone"}, @"d1", tpor.uuid, NO, tdef.uuid, dts) isEqualToString:tdef.uuid],
+       "a dead binding falls back to the default");
+    ok([RZTemplateUUIDForDisplay(one, nil, tpor.uuid, YES, tdef.uuid, dts) isEqualToString:tpor.uuid],
+       "no identity (virtual display) falls through to orientation");
+    // The pre-feature config: empty bindings, dead portrait. Every path lands on
+    // the default exactly as RZStore did before this existed.
+    ok([RZTemplateUUIDForDisplay(@{}, nil, nil, YES, tdef.uuid, dts) isEqualToString:tdef.uuid],
+       "no bindings and no portrait split: the default everywhere");
+    ok([RZTemplateUUIDForDisplay(nil, @"d1", @"gone", YES, tdef.uuid, dts) isEqualToString:tdef.uuid],
+       "a dead portrait choice still resolves to the default");
+
+    group("display binding encoding");
+    NSDictionary *denc = RZConfigDictionary(dts, tdef.uuid, tpor.uuid, @{@"d1": tmon.uuid},
+                                            @{@"d1": @"DELL U2719D"}, @"cmd", 0, 8, RZDefaultShortcuts());
+    ok([denc[@"displayActive"][@"d1"][@"template"] isEqualToString:tmon.uuid], "the binding is written");
+    ok([denc[@"displayActive"][@"d1"][@"name"] isEqualToString:@"DELL U2719D"], "the label rides with it");
+    ok([RZDisplayActiveFromConfig(denc)[@"d1"] isEqualToString:tmon.uuid], "the binding round-trips");
+    ok([RZDisplayNamesFromConfig(denc)[@"d1"] isEqualToString:@"DELL U2719D"], "the label round-trips");
+    ok([NSJSONSerialization isValidJSONObject:denc], "a bound config still serialises");
+    // Absent rather than empty: an older build reads the file unchanged, and the
+    // same rule as activePortrait keeps the JSON honest about unset state.
+    ok(RZConfigDictionary(dts, tdef.uuid, nil, nil, nil, @"cmd", 0, 8, nil)[@"displayActive"] == nil,
+       "no bindings writes no key");
+    ok(RZConfigDictionary(dts, tdef.uuid, nil, @{}, @{@"d1": @"stale"}, @"cmd", 0, 8, nil)[@"displayActive"] == nil,
+       "labels alone are never written");
+    NSDictionary *partial = RZConfigDictionary(dts, tdef.uuid, nil, @{@"d1": tmon.uuid},
+                                               @{@"d1": @"DELL U2719D", @"ghost": @"Long unplugged"},
+                                               @"cmd", 0, 8, nil);
+    ok(partial[@"displayActive"][@"ghost"] == nil, "a label whose binding is gone does not outlive it");
 
     group("zone model");
     NSArray *orig = @[RZZone(0, 0, .5, 1)];

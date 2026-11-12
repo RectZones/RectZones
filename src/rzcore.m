@@ -180,9 +180,64 @@ NSString *RZActiveUUIDFromConfig(NSDictionary *cfg, BOOL portrait) {
     return RZConfigValue(cfg, @"activePortrait", NSString.class) ?: landscape;
 }
 
+#pragma mark - Display binding
+
+NSString *RZDisplayIdentityFromNumbers(NSUInteger vendor, NSUInteger model, NSUInteger serial) {
+    // Three EDID numbers and nothing else: a display's CGDirectDisplayID is
+    // handed out fresh on every connect and its resolution is one Settings click
+    // away, but these only change when the panel itself changes.
+    return [NSString stringWithFormat:@"%lu-%lu-%lu",
+            (unsigned long)vendor, (unsigned long)model, (unsigned long)serial];
+}
+
+// Shared shape for the two maps stored under one JSON key: pull one string
+// field out of each entry, dropping entries without it.
+static NSDictionary<NSString *, NSString *> *RZDisplayFieldFromConfig(NSDictionary *cfg, NSString *field) {
+    NSDictionary *raw = RZConfigValue(cfg, @"displayActive", NSDictionary.class);
+    NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    [raw enumerateKeysAndObjectsUsingBlock:^(id k, id v, BOOL *stop) {
+        NSString *value = [v isKindOfClass:NSDictionary.class] ? RZConfigValue(v, field, NSString.class) : nil;
+        if ([k isKindOfClass:NSString.class] && [(NSString *)k length] && value.length) out[k] = value;
+    }];
+    return out;
+}
+
+NSDictionary<NSString *, NSString *> *RZDisplayActiveFromConfig(NSDictionary *cfg) {
+    return RZDisplayFieldFromConfig(cfg, @"template");
+}
+
+NSDictionary<NSString *, NSString *> *RZDisplayNamesFromConfig(NSDictionary *cfg) {
+    return RZDisplayFieldFromConfig(cfg, @"name");
+}
+
+static BOOL RZUUIDLive(NSArray<RZTemplate *> *templates, NSString *uuid) {
+    if (![uuid isKindOfClass:NSString.class] || !uuid.length) return NO;
+    for (RZTemplate *t in templates)
+        if ([t.uuid isEqualToString:uuid]) return YES;
+    return NO;
+}
+
+NSString *RZTemplateUUIDForDisplay(NSDictionary<NSString *, NSString *> *displayActive,
+                                   NSString *identity,
+                                   NSString *activePortraitUUID,
+                                   BOOL portrait,
+                                   NSString *activeUUID,
+                                   NSArray<RZTemplate *> *templates) {
+    // Most specific statement about a display wins: a named binding survives
+    // rotation (a monitor bound while landscape keeps its template when turned
+    // portrait — the user chose it for that screen, not for that shape); the
+    // orientation split is next; the default is last.
+    NSString *bound = identity.length ? displayActive[identity] : nil;
+    if (RZUUIDLive(templates, bound)) return bound;
+    if (portrait && RZUUIDLive(templates, activePortraitUUID)) return activePortraitUUID;
+    return activeUUID;
+}
+
 NSDictionary *RZConfigDictionary(NSArray<RZTemplate *> *templates,
                                  NSString *activeUUID,
                                  NSString *activePortraitUUID,
+                                 NSDictionary<NSString *, NSString *> *displayActive,
+                                 NSDictionary<NSString *, NSString *> *displayNames,
                                  NSString *trigger,
                                  NSInteger customKey,
                                  NSInteger gap,
@@ -202,6 +257,19 @@ NSDictionary *RZConfigDictionary(NSArray<RZTemplate *> *templates,
     // Absent rather than mirrored: "no portrait template" is a real state, and an
     // older build reading this file must not see a key it will not understand.
     if (activePortraitUUID.length) out[@"activePortrait"] = activePortraitUUID;
+    if (displayActive.count) {
+        NSMutableDictionary *entries = [NSMutableDictionary dictionary];
+        [displayActive enumerateKeysAndObjectsUsingBlock:^(NSString *identity, NSString *uuid, BOOL *stop) {
+            if (![identity isKindOfClass:NSString.class] || !identity.length
+                || ![uuid isKindOfClass:NSString.class] || !uuid.length) return;
+            NSMutableDictionary *entry = [@{@"template": uuid} mutableCopy];
+            // The name rides along so an offline display still has a label.
+            NSString *name = [displayNames isKindOfClass:NSDictionary.class] ? displayNames[identity] : nil;
+            if ([name isKindOfClass:NSString.class] && name.length) entry[@"name"] = name;
+            entries[identity] = entry;
+        }];
+        if (entries.count) out[@"displayActive"] = entries;
+    }
     return out;
 }
 

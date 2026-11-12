@@ -32,6 +32,11 @@
 - **Rotated displays get their own template** — a layout drawn for a wide screen is
   geometrically valid on a portrait monitor and completely useless there. Save a second
   template as *Portrait only* and each display uses the one that fits its shape.
+- **Per-display templates** — the same popup lists every connected display by name
+  (and each one you have bound, tagged *offline* while unplugged). Bind a grid to a
+  monitor and the binding keys on that panel's own identity, so it survives unplugging,
+  a different port and resolution changes. A named display wins over an orientation
+  choice, which wins over *All displays*.
 - **Adjustable gap** between placed windows (0–40 px; type it in the editor, it takes
   effect as soon as you leave the field), multi-monitor aware,
   Objective-C with zero dependencies.
