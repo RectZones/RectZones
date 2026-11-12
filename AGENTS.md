@@ -16,7 +16,7 @@ single-file Objective-C app**: clang + Cocoa, zero external dependencies. Rectan
 | Section | What |
 |---|---|
 | `RZLog` | Diagnostic log → `/tmp/rectzones.log`. Read this FIRST on any bug report. |
-| Model (`RZTemplate`, `RZStore`) | Templates + active template + trigger + shortcuts + gap; JSON persistence at `~/Library/Application Support/RectZones/config.json`. |
+|Model (`RZTemplate`, `RZStore`)|Templates + active template + per-display bindings (`displayActive`, keyed by the EDID identity from `RZDisplayIdentityForScreen` — vendor/model/serial, so bindings survive replug, port swap and resolution change) + trigger + shortcuts + gap; JSON persistence at `~/Library/Application Support/RectZones/config.json`. Resolution precedence: display binding → portrait choice → default. Virtual displays report no stable identity and fall through to orientation.|
 | Coordinates | CRITICAL: CG/AX coordinates are top-left origin (y down), AppKit is bottom-left (y up). Zones are ratios (0–1) of a screen's `visibleFrame`, top-left origin. All conversions live here — if windows land in the wrong place, look here first. With Accessibility Zoom on, the tap's pointer position is first mapped through the zoom geometry (`RZPointerPoint`, gotcha 6). |
 | Overlay (`RZZoneView`, `RZFootprint`, `RZOverlay`) | Per-screen click-through borderless panels; zone highlighting (hover/selected/covered) and the single-rect footprint for edge snapping. |
 | AX helpers (`RZWindowAt`…) | Window under cursor, read/write frames. Position is written again after resize (some apps shift it). |
@@ -187,10 +187,15 @@ outside a deliberate, announced migration.
 
 - Launch at login (`SMAppService`).
 - Rectangle parity extras: previous display, center, restore.
-- Per-screen templates. Per-orientation is done (one template for landscape screens, an
-  optional second one for portrait, chosen by the screen's shape at placement time);
-  binding a template to a specific display is still open and needs a display identity
-  that survives unplugging and port changes.
+- ~~Per-screen templates.~~ **Done.** Per-orientation (one template for landscape screens, an
+  optional second for portrait, chosen by shape at placement) was already in; binding a
+  template to a specific display came next, keyed by `RZDisplayIdentityForScreen` (the EDID
+  vendor/model/serial behind the `CGDirectDisplayID` — never the id itself, which is new on
+  every connect). The editor's scope popup lists connected displays by name plus bound
+  ones tagged offline; names are persisted with the binding purely as labels. Known limits:
+  virtual displays report all-zero EDID numbers and get no identity (orientation rules only),
+  and a dock or KVM that substitutes its own EDID will present itself as the identity —
+  the startup `display:` log lines name every identity the app sees.
 - ~~Test coverage.~~ **Done.** The pure logic — zone geometry, placement math, config
   read/write — now lives in `src/rzcore.m`, which `build.sh` compiles alongside
   `src/main.m`; the test runner is a separate `clang` target (`test.sh`) that links only

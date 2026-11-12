@@ -36,6 +36,22 @@ static void RZLog(NSString *fmt, ...) {
 _Static_assert(RZModControl == NSEventModifierFlagControl, "RZModControl drifted from AppKit");
 _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted from AppKit");
 
+// The EDID numbers behind a screen, via its CoreGraphics display id. The id
+// itself is volatile (new one on every connect) and only used to look these up.
+// A display whose numbers are all zero (virtual displays, headless stubs) gets
+// no identity: it cannot be told apart from another one across a replug, so a
+// binding to it would be a lie — it falls back to the orientation choice.
+static NSString *RZDisplayIdentityForScreen(NSScreen *screen) {
+    NSNumber *num = screen.deviceDescription[@"NSScreenNumber"];
+    if (![num isKindOfClass:NSNumber.class]) return nil;
+    CGDirectDisplayID did = (CGDirectDisplayID)num.unsignedIntValue;
+    NSUInteger vendor = CGDisplayVendorNumber(did);
+    NSUInteger model  = CGDisplayModelNumber(did);
+    NSUInteger serial = CGDisplaySerialNumber(did);
+    if (!(vendor | model | serial)) return nil;
+    return RZDisplayIdentityFromNumbers(vendor, model, serial);
+}
+
 @interface RZStore : NSObject
 @property (nonatomic, strong) NSMutableArray<RZTemplate *> *templates;
 @property (nonatomic, copy) NSString *activeUUID;
@@ -43,6 +59,12 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
 // nil means "same template everywhere", which is what every config written
 // before this existed says, and what the app did.
 @property (nonatomic, copy) NSString *activePortraitUUID;
+// identity → template uuid, and identity → display name for that same entry
+// (the name labels an offline binding in the editor; placement never reads it).
+// The identity is the panel's EDID numbers, so a binding survives unplugging,
+// a different port, and a resolution change.
+@property (nonatomic, copy) NSDictionary<NSString *, NSString *> *displayActive;
+@property (nonatomic, copy) NSDictionary<NSString *, NSString *> *displayNames;
 @property (nonatomic, copy) NSString *trigger; // cmd | alt | ctrl | fn | custom
 @property (nonatomic) NSInteger customKey;     // key held down while trigger=custom
 @property (nonatomic) NSInteger gap;           // placement gap (px, all four sides)
@@ -54,6 +76,8 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
 - (void)save;
 - (void)upsert:(RZTemplate *)t;
 - (void)removeUUID:(NSString *)uuid;
+- (void)bindDisplay:(NSString *)identity toTemplate:(NSString *)uuid name:(NSString *)name;
+- (void)unbindTemplate:(NSString *)uuid;
 @end
 
 @implementation RZStore
@@ -87,6 +111,18 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
     NSString *portrait = RZActiveUUIDFromConfig(cfg, YES);
     self.activePortraitUUID = [portrait isEqualToString:self.activeUUID] ? nil
                             : ([self findUUID:portrait] ? portrait : nil);
+    // Bindings pointing at templates that no longer exist are dropped at load,
+    // so their names go with them and the file does not accumulate dead keys.
+    NSMutableDictionary *bound = [NSMutableDictionary dictionary];
+    [RZDisplayActiveFromConfig(cfg) enumerateKeysAndObjectsUsingBlock:^(NSString *ident, NSString *uuid, BOOL *stop) {
+        if ([self findUUID:uuid]) bound[ident] = uuid;
+    }];
+    self.displayActive = bound;
+    NSMutableDictionary *names = [NSMutableDictionary dictionary];
+    [RZDisplayNamesFromConfig(cfg) enumerateKeysAndObjectsUsingBlock:^(NSString *ident, NSString *name, BOOL *stop) {
+        if (bound[ident]) names[ident] = name;
+    }];
+    self.displayNames = names;
     self.trigger    = RZTriggerFromConfig(cfg);
     self.customKey  = RZCustomKeyFromConfig(cfg);
     self.gap        = RZGapFromConfig(cfg);
@@ -106,16 +142,19 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
 
 // The template a given display should use. Everything that places a window goes
 // through here; -active remains the editor's notion of "the one being worked on".
+// Precedence: the template bound to this display's identity, else the portrait
+// choice on a portrait display, else the default.
 - (RZTemplate *)activeForScreen:(NSScreen *)screen {
-    if (screen && self.activePortraitUUID && RZFrameIsPortrait(screen.frame)) {
-        RZTemplate *t = [self findUUID:self.activePortraitUUID];
-        if (t) return t;
-    }
-    return [self active];
+    NSString *uuid = RZTemplateUUIDForDisplay(self.displayActive, screen ? RZDisplayIdentityForScreen(screen) : nil,
+                                              self.activePortraitUUID,
+                                              screen && RZFrameIsPortrait(screen.frame),
+                                              self.activeUUID, self.templates);
+    return [self findUUID:uuid] ?: [self active];
 }
 
 - (void)save {
     NSDictionary *cfg = RZConfigDictionary(self.templates, self.activeUUID, self.activePortraitUUID,
+                                           self.displayActive, self.displayNames,
                                            self.trigger, self.customKey, self.gap, self.shortcuts);
     NSData *data = [NSJSONSerialization dataWithJSONObject:cfg options:NSJSONWritingPrettyPrinted error:nil];
     [data writeToFile:[self path] atomically:YES];
@@ -126,12 +165,51 @@ _Static_assert(RZModOption  == NSEventModifierFlagOption,  "RZModOption drifted 
     [self save];
 }
 
+// One scope statement per template: binding replaces any earlier binding of
+// the same template, and a display can only be bound to one thing — the new
+// entry simply wins. `name` labels the binding while the display is offline;
+// nil keeps the name already stored for it.
+- (void)bindDisplay:(NSString *)identity toTemplate:(NSString *)uuid name:(NSString *)name {
+    if (!identity.length || !uuid.length) return;
+    NSMutableDictionary *a = [self.displayActive mutableCopy];
+    NSMutableDictionary *n = [self.displayNames mutableCopy];
+    [self stripBindingsOf:uuid from:a names:n];
+    a[identity] = uuid;
+    if (name.length) n[identity] = name;
+    self.displayActive = a;
+    self.displayNames = n;
+    RZLog(@"display bound: %@ → template %@", name ?: identity, uuid);
+    [self save];
+}
+
+- (void)unbindTemplate:(NSString *)uuid {
+    if (!self.displayActive.count) return;
+    NSMutableDictionary *a = [self.displayActive mutableCopy];
+    NSMutableDictionary *n = [self.displayNames mutableCopy];
+    NSUInteger before = a.count;
+    [self stripBindingsOf:uuid from:a names:n];
+    if (a.count == before) return;
+    self.displayActive = a;
+    self.displayNames = n;
+    RZLog(@"display bindings cleared for template %@", uuid);
+    [self save];
+}
+
+- (void)stripBindingsOf:(NSString *)uuid from:(NSMutableDictionary *)a names:(NSMutableDictionary *)n {
+    for (NSString *identity in [a allKeysForObject:uuid]) {
+        [a removeObjectForKey:identity];
+        [n removeObjectForKey:identity];
+    }
+}
+
 - (void)removeUUID:(NSString *)uuid {
     if (self.templates.count <= 1) return;
     RZTemplate *t = [self findUUID:uuid];
     if (t) [self.templates removeObject:t];
     if ([self.activeUUID isEqualToString:uuid]) self.activeUUID = self.templates[0].uuid;
     if ([self.activePortraitUUID isEqualToString:uuid]) self.activePortraitUUID = nil;
+    // A deleted template's display must not be left pointing at nothing.
+    [self unbindTemplate:uuid];
     [self save];
 }
 
@@ -691,9 +769,15 @@ static CGEventRef RZTapCB(CGEventTapProxy proxy, CGEventType type, CGEventRef ev
         if (self.overlayActive && !self.triggerDown) [self endSessionPlacing:NO];
         return;
     }
+    // The screen and its template resolve before the log: with per-display
+    // bindings the session's grid is the display's own, and a bug report needs
+    // to say which one was in play.
+    NSScreen *screen = RZScreenAtCG(p);
+    RZTemplate *tpl = [RZStore.shared activeForScreen:screen];
+    NSArray *zones = tpl.zones;
+    NSInteger idx = -1;
     if (!self.overlayActive) {
-        RZLog(@"session started: template=%@ zones=%lu", RZStore.shared.active.name,
-              (unsigned long)RZStore.shared.active.zones.count);
+        RZLog(@"session started: template=%@ zones=%lu", tpl.name, (unsigned long)zones.count);
         CGPoint zoomCentre;
         double zoomFactor;
         if (RZZoomParameters(&zoomCentre, &zoomFactor)) {
@@ -705,9 +789,6 @@ static CGEventRef RZTapCB(CGEventTapProxy proxy, CGEventType type, CGEventRef ev
     }
     self.overlayActive = YES;
 
-    NSScreen *screen = RZScreenAtCG(p);
-    NSInteger idx = -1;
-    NSArray *zones = [RZStore.shared activeForScreen:screen].zones;
     if (screen) idx = RZZoneIndexAtCG(p, screen, zones);
     self.hovScreen = screen;
     self.hovIndex = idx;
@@ -1327,7 +1408,11 @@ static OSStatus RZHotKeyHandler(EventHandlerCallRef next, EventRef event, void *
 @class RZApp;
 static RZApp *gApp;
 
-@interface RZEditor : NSObject
+@interface RZEditor : NSObject {
+    // Where the scope popup may reach: its left edge and its width budget, both
+    // set by build and honored by updateUsePopupWidth.
+    CGFloat _usePopupMinX, _usePopupMaxW;
+}
 @property (nonatomic, strong) NSView *view;
 @property (nonatomic, strong) RZEditorCanvas *canvas;
 @property (nonatomic, strong) NSPopUpButton *popup;
@@ -1465,20 +1550,24 @@ static RZApp *gApp;
     self.saveButton = saveBtn;
     bx2 += sf.size.width + 6;
 
-    // Which displays this template applies to. Orientation rather than identity:
-    // a rotated monitor keeps its shape across unplugging, a different port, or a
-    // resolution change, so nothing has to be remembered about the display itself.
-    self.usePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(bx2, by, 132, 26) pullsDown:NO];
-    [self.usePopup addItemsWithTitles:@[@"All displays", @"Landscape only", @"Portrait only"]];
-    self.usePopup.toolTip = @"Which displays this template is used on when a window is dropped.";
+    // Which displays this template applies to. Orientation covers "any screen
+    // of this shape"; below the separator each connected display is listed by
+    // name, for a grid that belongs to that one monitor. A named display beats
+    // an orientation choice, which beats All displays.
+    // The row is not chained left-to-right anymore: display names have no
+    // bounded length, and a chained row let a long one shove the gap controls
+    // off the view. The popup gets everything between here and the cluster
+    // minus a small margin; its width then follows the selected title within
+    // that budget (updateUsePopupWidth), truncating only when names outgrow
+    // even the whole budget.
+    self.usePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(bx2, by, 150, 26) pullsDown:NO];
+    self.usePopup.toolTip = @"Which displays this template is used on when a window is dropped. "
+                            @"A named display wins over an orientation choice, which wins over All displays.";
     [c addSubview:self.usePopup];
-    bx2 += 138;
+    CGFloat popupMinX = bx2;
 
     NSTextField *gapLabel = [NSTextField labelWithString:@"Gap"];
-    gapLabel.frame = NSMakeRect(bx2, by + 5, 46, 18);
-    [c addSubview:gapLabel];
-    bx2 += 48;
-    self.gapField = [[NSTextField alloc] initWithFrame:NSMakeRect(bx2, by + 1, 36, 24)];
+    self.gapField = [[NSTextField alloc] initWithFrame:NSZeroRect];
     self.gapField.target = self;
     self.gapField.action = @selector(gapChanged);
     // A field built in code only fires its action on Return, and Return here belongs to
@@ -1486,11 +1575,17 @@ static RZApp *gApp;
     // for that, then every way out of the field (click elsewhere, Save & Use, closing or
     // leaving the window) commits the typed value (gotcha 7).
     ((NSTextFieldCell *)self.gapField.cell).sendsActionOnEndEditing = YES;
-    [c addSubview:self.gapField];
-    bx2 += 40;
     NSTextField *pxLabel = [NSTextField labelWithString:@"px"];
-    pxLabel.frame = NSMakeRect(bx2, by + 5, 22, 18);
+    // Gap label 46 + 2 · field 36 + 4 · px 22: right-aligned as a unit.
+    CGFloat gapX = W - pad - 110;
+    gapLabel.frame = NSMakeRect(gapX, by + 5, 46, 18);
+    self.gapField.frame = NSMakeRect(gapX + 48, by + 1, 36, 24);
+    pxLabel.frame = NSMakeRect(gapX + 88, by + 5, 22, 18);
+    [c addSubview:gapLabel];
+    [c addSubview:self.gapField];
     [c addSubview:pxLabel];
+    _usePopupMinX = popupMinX;
+    _usePopupMaxW = gapX - 8 - popupMinX;
 
     __weak typeof(self) ws = self;
     self.canvas.onChange = ^{ [ws markDirty]; };
@@ -1527,17 +1622,97 @@ static RZApp *gApp;
     self.canvas.selectedZone = self.canvas.zones.count ? 0 : -1;
     self.canvas.needsDisplay = YES;
     [self clearDirty];
+    [self refreshUsePopup];
+}
+
+// Rebuilt on every load: displays come and go, and a binding to a display that
+// happens to be unplugged must still appear — with no item for it, the popup
+// would read as "All displays" and the next Save & Use would silently drop the
+// binding the user cannot see.
+- (void)refreshUsePopup {
+    NSMenu *m = self.usePopup.menu;
+    [m removeAllItems];
+    NSArray<NSArray<NSString *> *> *fixed =
+        @[@[@"all", @"All displays"], @[@"landscape", @"Landscape only"], @[@"portrait", @"Portrait only"]];
+    for (NSArray<NSString *> *f in fixed) {
+        NSMenuItem *it = [[NSMenuItem alloc] initWithTitle:f[1] action:NULL keyEquivalent:@""];
+        it.representedObject = f[0];
+        [m addItem:it];
+    }
+
+    // Connected displays, in NSScreen order; mirroring reports the same panel
+    // more than once, so identities are shown once each.
+    NSMutableArray<NSString *> *order = [NSMutableArray array];
+    NSMutableDictionary<NSString *, NSString *> *titles = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSNumber *> *identitySeen = [NSMutableDictionary dictionary];
+    for (NSScreen *s in NSScreen.screens) {
+        NSString *ident = RZDisplayIdentityForScreen(s);
+        if (!ident) continue;
+        if (identitySeen[ident]) continue;
+        identitySeen[ident] = @YES;
+        NSString *title = s.localizedName.length ? s.localizedName : @"Display";
+        [order addObject:ident];
+        titles[ident] = title;
+    }
+    NSArray<NSString *> *offline = [[RZStore.shared.displayActive allKeys]
+        sortedArrayUsingSelector:@selector(compare:)];
+    for (NSString *ident in offline) {
+        if (identitySeen[ident]) continue;
+        NSString *name = RZStore.shared.displayNames[ident] ?: @"Display";
+        [order addObject:ident];
+        titles[ident] = [name stringByAppendingString:@" (offline)"];
+    }
+    if (order.count) [m addItem:NSMenuItem.separatorItem];
+    NSMutableDictionary<NSString *, NSNumber *> *titleCount = [NSMutableDictionary dictionary];
+    for (NSString *ident in order) {
+        NSString *title = titles[ident];
+        // Two identical models on the desk: the popup must still tell them apart.
+        NSUInteger dup = [titleCount[title] unsignedIntegerValue] + 1;
+        titleCount[title] = @(dup);
+        if (dup > 1) title = [NSString stringWithFormat:@"%@ (%lu)", title, (unsigned long)dup];
+        NSMenuItem *it = [[NSMenuItem alloc] initWithTitle:title action:NULL keyEquivalent:@""];
+        it.representedObject = ident;
+        [m addItem:it];
+    }
     [self syncUsePopup];
 }
 
 - (void)syncUsePopup {
     NSString *uuid = self.editing.uuid;
-    BOOL isLandscape = [RZStore.shared.activeUUID isEqualToString:uuid];
-    BOOL isPortrait  = [RZStore.shared.activePortraitUUID isEqualToString:uuid];
-    NSInteger idx = 0;
-    if (isPortrait && !isLandscape)      idx = 2;
-    else if (isLandscape && RZStore.shared.activePortraitUUID) idx = 1;
-    [self.usePopup selectItemAtIndex:idx];
+    NSMenu *m = self.usePopup.menu;
+    __block NSString *boundKey = nil;
+    [RZStore.shared.displayActive enumerateKeysAndObjectsUsingBlock:^(NSString *ident, NSString *u, BOOL *stop) {
+        if ([u isEqualToString:uuid]) { boundKey = ident; *stop = YES; }
+    }];
+    NSInteger idx = boundKey ? [m indexOfItemWithRepresentedObject:boundKey] : -1;
+    if (idx < 0) {
+        // Not a display binding (or its item vanished mid-edit): fall back to the
+        // orientation reading, exactly as before per-display existed.
+        BOOL isLandscape = [RZStore.shared.activeUUID isEqualToString:uuid];
+        BOOL isPortrait  = [RZStore.shared.activePortraitUUID isEqualToString:uuid];
+        NSString *key = @"all";
+        if (isPortrait && !isLandscape) key = @"portrait";
+        else if (isLandscape && RZStore.shared.activePortraitUUID) key = @"landscape";
+        idx = [m indexOfItemWithRepresentedObject:key];
+    }
+    if (idx >= 0) [self.usePopup selectItemAtIndex:idx];
+    [self updateUsePopupWidth];
+}
+
+// The popup shows the selected scope, and display names have no length limit.
+// Width follows the selection within the space build() allotted — never further
+// right than that, whatever the name — so the gap cluster stands at a fixed
+// place for every template. A name longer than the whole budget truncates.
+- (void)updateUsePopupWidth {
+    NSString *title = self.usePopup.titleOfSelectedItem ?: @"";
+    NSFont *font = self.usePopup.font ?: [NSFont systemFontOfSize:13];
+    CGFloat textW = [title sizeWithAttributes:@{NSFontAttributeName: font}].width;
+    CGFloat w = MIN(_usePopupMaxW, MAX(100, ceil(textW) + 42)); // 42: bezel + arrows
+    NSRect f = self.usePopup.frame;
+    if (fabs(f.size.width - w) < 0.5) return;
+    f.origin.x = _usePopupMinX;
+    f.size.width = w;
+    self.usePopup.frame = f;
 }
 
 - (void)markDirty {
@@ -1647,21 +1822,34 @@ static RZApp *gApp;
     self.editing.name = self.nameField.stringValue.length ? self.nameField.stringValue : @"Untitled";
     self.editing.zones = RZCopyZones(self.canvas.zones);
     [RZStore.shared upsert:self.editing];
-    switch (self.usePopup.indexOfSelectedItem) {
-        case 1: // landscape only — leave any portrait choice alone
-            RZStore.shared.activeUUID = self.editing.uuid;
-            break;
-        case 2: // portrait only
-            RZStore.shared.activePortraitUUID = self.editing.uuid;
-            break;
-        default: // all displays: one template everywhere, which clears the split
-            RZStore.shared.activeUUID = self.editing.uuid;
-            RZStore.shared.activePortraitUUID = nil;
-            break;
+    // The popup item carries the scope as its represented object: all /
+    // landscape / portrait / a display identity. Indices move when displays
+    // come and go, so they were never the thing to switch on.
+    NSString *scope = [self.usePopup.selectedItem.representedObject isKindOfClass:NSString.class]
+        ? self.usePopup.selectedItem.representedObject : @"all";
+    NSString *uuid = self.editing.uuid;
+    if ([scope isEqualToString:@"landscape"]) {
+        // landscape only — leave any portrait choice alone
+        RZStore.shared.activeUUID = uuid;
+    } else if ([scope isEqualToString:@"portrait"]) {
+        // portrait only
+        RZStore.shared.activePortraitUUID = uuid;
+    } else if ([scope isEqualToString:@"all"]) {
+        // all displays: one template everywhere, which clears the split — and
+        // this template's own per-display bindings, which would silently
+        // outrank the choice just made.
+        RZStore.shared.activeUUID = uuid;
+        RZStore.shared.activePortraitUUID = nil;
+        [RZStore.shared unbindTemplate:uuid];
+    } else {
+        // a specific display: bind it and label the binding while it is offline
+        [RZStore.shared bindDisplay:scope toTemplate:uuid
+                               name:[self.usePopup.selectedItem.title stringByReplacingOccurrencesOfString:@" (offline)" withString:@""]];
     }
     [RZStore.shared save];
     [RZHotkeys.shared resetCycle];
     [self reloadPopup];
+    [self syncUsePopup];
     [self clearDirty];
     [gApp rebuildMenu];
 }
@@ -2149,6 +2337,14 @@ static NSImage *RZMenuBarImage(BOOL trusted) {
     RZLog(@"launched pid=%d trusted=%d template=%@ trigger=%@",
           NSProcessInfo.processInfo.processIdentifier, AXIsProcessTrusted(),
           RZStore.shared.active.name, RZStore.shared.trigger);
+    // What each display resolves to, and the key a binding would use for it:
+    // the two halves of every "my zones don't show on this monitor" report.
+    for (NSScreen *s in NSScreen.screens) {
+        RZLog(@"display: %@ identity=%@ template=%@",
+              s.localizedName.length ? s.localizedName : @"(unnamed)",
+              RZDisplayIdentityForScreen(s) ?: @"none",
+              [RZStore.shared activeForScreen:s].name);
+    }
 
     self.statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
     [self setMenuBarTrusted:AXIsProcessTrusted()];
