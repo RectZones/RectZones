@@ -1408,7 +1408,11 @@ static OSStatus RZHotKeyHandler(EventHandlerCallRef next, EventRef event, void *
 @class RZApp;
 static RZApp *gApp;
 
-@interface RZEditor : NSObject
+@interface RZEditor : NSObject {
+    // Where the scope popup may reach: its left edge and its width budget, both
+    // set by build and honored by updateUsePopupWidth.
+    CGFloat _usePopupMinX, _usePopupMaxW;
+}
 @property (nonatomic, strong) NSView *view;
 @property (nonatomic, strong) RZEditorCanvas *canvas;
 @property (nonatomic, strong) NSPopUpButton *popup;
@@ -1550,17 +1554,20 @@ static RZApp *gApp;
     // of this shape"; below the separator each connected display is listed by
     // name, for a grid that belongs to that one monitor. A named display beats
     // an orientation choice, which beats All displays.
-    self.usePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(bx2, by, 168, 26) pullsDown:NO];
+    // The row is not chained left-to-right anymore: display names have no
+    // bounded length, and a chained row let a long one shove the gap controls
+    // off the view. The popup gets everything between here and the cluster
+    // minus a small margin; its width then follows the selected title within
+    // that budget (updateUsePopupWidth), truncating only when names outgrow
+    // even the whole budget.
+    self.usePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(bx2, by, 150, 26) pullsDown:NO];
     self.usePopup.toolTip = @"Which displays this template is used on when a window is dropped. "
                             @"A named display wins over an orientation choice, which wins over All displays.";
     [c addSubview:self.usePopup];
-    bx2 += 174;
+    CGFloat popupMinX = bx2;
 
     NSTextField *gapLabel = [NSTextField labelWithString:@"Gap"];
-    gapLabel.frame = NSMakeRect(bx2, by + 5, 46, 18);
-    [c addSubview:gapLabel];
-    bx2 += 48;
-    self.gapField = [[NSTextField alloc] initWithFrame:NSMakeRect(bx2, by + 1, 36, 24)];
+    self.gapField = [[NSTextField alloc] initWithFrame:NSZeroRect];
     self.gapField.target = self;
     self.gapField.action = @selector(gapChanged);
     // A field built in code only fires its action on Return, and Return here belongs to
@@ -1568,11 +1575,17 @@ static RZApp *gApp;
     // for that, then every way out of the field (click elsewhere, Save & Use, closing or
     // leaving the window) commits the typed value (gotcha 7).
     ((NSTextFieldCell *)self.gapField.cell).sendsActionOnEndEditing = YES;
-    [c addSubview:self.gapField];
-    bx2 += 40;
     NSTextField *pxLabel = [NSTextField labelWithString:@"px"];
-    pxLabel.frame = NSMakeRect(bx2, by + 5, 22, 18);
+    // Gap label 46 + 2 · field 36 + 4 · px 22: right-aligned as a unit.
+    CGFloat gapX = W - pad - 110;
+    gapLabel.frame = NSMakeRect(gapX, by + 5, 46, 18);
+    self.gapField.frame = NSMakeRect(gapX + 48, by + 1, 36, 24);
+    pxLabel.frame = NSMakeRect(gapX + 88, by + 5, 22, 18);
+    [c addSubview:gapLabel];
+    [c addSubview:self.gapField];
     [c addSubview:pxLabel];
+    _usePopupMinX = popupMinX;
+    _usePopupMaxW = gapX - 8 - popupMinX;
 
     __weak typeof(self) ws = self;
     self.canvas.onChange = ^{ [ws markDirty]; };
@@ -1683,6 +1696,23 @@ static RZApp *gApp;
         idx = [m indexOfItemWithRepresentedObject:key];
     }
     if (idx >= 0) [self.usePopup selectItemAtIndex:idx];
+    [self updateUsePopupWidth];
+}
+
+// The popup shows the selected scope, and display names have no length limit.
+// Width follows the selection within the space build() allotted — never further
+// right than that, whatever the name — so the gap cluster stands at a fixed
+// place for every template. A name longer than the whole budget truncates.
+- (void)updateUsePopupWidth {
+    NSString *title = self.usePopup.titleOfSelectedItem ?: @"";
+    NSFont *font = self.usePopup.font ?: [NSFont systemFontOfSize:13];
+    CGFloat textW = [title sizeWithAttributes:@{NSFontAttributeName: font}].width;
+    CGFloat w = MIN(_usePopupMaxW, MAX(100, ceil(textW) + 42)); // 42: bezel + arrows
+    NSRect f = self.usePopup.frame;
+    if (fabs(f.size.width - w) < 0.5) return;
+    f.origin.x = _usePopupMinX;
+    f.size.width = w;
+    self.usePopup.frame = f;
 }
 
 - (void)markDirty {
